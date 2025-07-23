@@ -16,6 +16,7 @@ import {
 import { useState } from 'react';
 import { useLocation } from 'wouter';
 import { useAuth } from '@/hooks/use-auth';
+import { translateErrorMessage } from '@/lib/utils';
 
 export default function LoginPage() {
   const [, navigate] = useLocation();
@@ -52,7 +53,7 @@ export default function LoginPage() {
           navigate('/dashboard');
         },
         onError: (err) => {
-          setError(err.message || 'Error al iniciar sesión');
+          setError(translateErrorMessage(err.message) || 'Error al iniciar sesión');
         },
       }
     );

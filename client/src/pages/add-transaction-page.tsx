@@ -24,44 +24,74 @@ import {
 } from '@chakra-ui/react';
 import { useState } from 'react';
 import { useLocation } from 'wouter';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import Navigation from '@/components/navigation';
+import { useAuth } from '@/hooks/use-auth';
+import { useToast } from '@/hooks/use-toast';
+import { apiRequest, queryClient } from '@/lib/queryClient';
+import { Category } from '@shared/schema';
 
 export default function AddTransactionPage() {
+  const { user } = useAuth();
+  const { toast } = useToast();
   const [, navigate] = useLocation();
-  const [amount, setAmount] = useState<number>(0);
+  const [amount, setAmount] = useState<string>('');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('');
+  const [categoryId, setCategoryId] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [user, setUser] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
 
   const cardBg = useColorModeValue('white', 'gray.700');
 
+  // Fetch categories
+  const { data: categories = [], isLoading: isLoadingCategories } = useQuery<Category[]>({
+    queryKey: ['/api/categories'],
+    enabled: !!user,
+  });
+
+  // Create transaction mutation
+  const createTransactionMutation = useMutation({
+    mutationFn: async (data: { amount: string; description: string; categoryId: string; date: string }) => {
+      const res = await apiRequest('POST', '/api/transactions', data);
+      return await res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/budgets/analytics'] });
+      toast({
+        title: "Transacción creada",
+        description: "La transacción ha sido creada correctamente.",
+      });
+      navigate('/transactions');
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: "No se pudo crear la transacción.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
-    setError('');
 
-    if (!amount || !description || !category || !user) {
-      setError('Todos los campos son requeridos');
-      setIsLoading(false);
+    if (!amount || !description || !categoryId) {
+      toast({
+        title: "Error",
+        description: "Todos los campos son requeridos.",
+        variant: "destructive",
+      });
       return;
     }
 
-    // TODO: Implement actual transaction creation
-    console.log('Creating transaction:', {
+    const data = {
       amount,
       description,
-      category,
+      categoryId,
       date,
-      user
-    });
+    };
 
-    setTimeout(() => {
-      setIsLoading(false);
-      navigate('/transactions');
-    }, 1000);
+    createTransactionMutation.mutate(data);
   };
 
   return (
@@ -70,68 +100,69 @@ export default function AddTransactionPage() {
       
       <Container maxW="2xl" py={8}>
         <VStack spacing={6} align="stretch">
-          {/* Header */}
-          <VStack align="start" spacing={1}>
-            <Heading size="lg">Agregar Transacción</Heading>
-            <Text color="gray.600">Registra un nuevo gasto o ingreso de forma manual</Text>
+          <VStack align="start" spacing={2}>
+            <Heading size="lg">Nueva Transacción</Heading>
+            <Text color="gray.600">
+              Registra una nueva transacción para tu equipo
+            </Text>
           </VStack>
 
-          {/* Form */}
           <Card bg={cardBg}>
             <CardBody>
               <form onSubmit={handleSubmit}>
-                <VStack spacing={6}>
-                  {error && (
-                    <Alert status="error" borderRadius="md">
-                      <AlertIcon />
-                      {error}
-                    </Alert>
-                  )}
+                <VStack spacing={6} align="stretch">
+                  <FormControl isRequired>
+                    <FormLabel>Descripción</FormLabel>
+                    <Textarea
+                      placeholder="Describe la transacción (ej: Pago de renta, Compra en supermercado)"
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      rows={3}
+                      resize="vertical"
+                    />
+                  </FormControl>
 
                   <FormControl isRequired>
                     <FormLabel>Monto</FormLabel>
                     <NumberInput
                       value={amount}
-                      onChange={(_, value) => setAmount(value)}
+                      onChange={(value) => setAmount(value)}
                       precision={2}
                       step={0.01}
+                      min={0}
                     >
-                      <NumberInputField placeholder="0.00" />
+                      <NumberInputField 
+                        placeholder="0.00"
+                      />
                       <NumberInputStepper>
                         <NumberIncrementStepper />
                         <NumberDecrementStepper />
                       </NumberInputStepper>
                     </NumberInput>
-                    <Text fontSize="xs" color="gray.500" mt={1}>
-                      Usar números negativos para gastos, positivos para ingresos
+                    <Text fontSize="sm" color="gray.500" mt={1}>
+                      Ingresa el monto sin signo. Los gastos se registrarán como negativos automáticamente.
                     </Text>
-                  </FormControl>
-
-                  <FormControl isRequired>
-                    <FormLabel>Descripción</FormLabel>
-                    <Input
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                      placeholder="Ej: Pago de renta, Supermercado, Salario..."
-                    />
                   </FormControl>
 
                   <FormControl isRequired>
                     <FormLabel>Categoría</FormLabel>
                     <Select
-                      value={category}
-                      onChange={(e) => setCategory(e.target.value)}
                       placeholder="Selecciona una categoría"
+                      value={categoryId}
+                      onChange={(e) => setCategoryId(e.target.value)}
                     >
-                      <option value="Vivienda">🏠 Vivienda</option>
-                      <option value="Transporte">🚗 Transporte</option>
-                      <option value="Alimentación">🍽️ Alimentación</option>
-                      <option value="Compras">🛒 Compras</option>
-                      <option value="Entretenimiento">🎮 Entretenimiento</option>
-                      <option value="Salud">❤️ Salud</option>
-                      <option value="Educación">🎓 Educación</option>
-                      <option value="Ingresos">💰 Ingresos</option>
+                      {categories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.icon} {category.name}
+                        </option>
+                      ))}
                     </Select>
+                    {categories.length === 0 && !isLoadingCategories && (
+                      <Alert status="warning" mt={2}>
+                        <AlertIcon />
+                        No hay categorías disponibles. Crea algunas categorías primero.
+                      </Alert>
+                    )}
                   </FormControl>
 
                   <FormControl isRequired>
@@ -140,45 +171,26 @@ export default function AddTransactionPage() {
                       type="date"
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
+                      max={new Date().toISOString().split('T')[0]}
                     />
                   </FormControl>
 
-                  <FormControl isRequired>
-                    <FormLabel>Usuario</FormLabel>
-                    <Select
-                      value={user}
-                      onChange={(e) => setUser(e.target.value)}
-                      placeholder="Selecciona el usuario"
-                    >
-                      <option value="Juan García">Juan García</option>
-                      <option value="María García">María García</option>
-                    </Select>
-                  </FormControl>
-
-                  <FormControl>
-                    <FormLabel>Notas adicionales (opcional)</FormLabel>
-                    <Textarea
-                      placeholder="Información adicional sobre esta transacción..."
-                      rows={3}
-                    />
-                  </FormControl>
-
-                  <HStack spacing={4} w="full" pt={4}>
+                  <HStack spacing={4} pt={4}>
                     <Button
-                      variant="outline"
+                      variant="ghost"
                       onClick={() => navigate('/transactions')}
-                      flex={1}
+                      isDisabled={createTransactionMutation.isPending}
                     >
                       Cancelar
                     </Button>
                     <Button
                       type="submit"
                       colorScheme="blue"
-                      isLoading={isLoading}
-                      loadingText="Guardando..."
+                      isLoading={createTransactionMutation.isPending}
+                      loadingText="Creando..."
                       flex={1}
                     >
-                      Guardar Transacción
+                      Crear Transacción
                     </Button>
                   </HStack>
                 </VStack>
@@ -186,9 +198,22 @@ export default function AddTransactionPage() {
             </CardBody>
           </Card>
 
-          <Text fontSize="sm" color="gray.500" textAlign="center">
-            La transacción será visible inmediatamente en tu dashboard y lista de transacciones
-          </Text>
+          {/* Quick Tips */}
+          <Card bg={cardBg} variant="outline">
+            <CardBody>
+              <VStack align="start" spacing={3}>
+                <Heading size="sm" color="blue.500">
+                  💡 Consejos rápidos
+                </Heading>
+                <VStack align="start" spacing={2} fontSize="sm" color="gray.600">
+                  <Text>• Usa descripciones claras para facilitar la búsqueda posterior</Text>
+                  <Text>• Los montos se registran como gastos (negativos) por defecto</Text>
+                  <Text>• Para ingresos, usa categorías específicas como "Salario" o "Ingresos extra"</Text>
+                  <Text>• Puedes editar la transacción más tarde si es necesario</Text>
+                </VStack>
+              </VStack>
+            </CardBody>
+          </Card>
         </VStack>
       </Container>
     </Box>

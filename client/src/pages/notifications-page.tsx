@@ -11,61 +11,90 @@ import {
   Badge,
   useColorModeValue,
   Avatar,
+  useToast,
+  Spinner,
+  Center,
 } from '@chakra-ui/react';
 import Navigation from '@/components/navigation';
 import { FaBell, FaCheck, FaCheckDouble } from 'react-icons/fa';
-
-const mockNotifications = [
-  {
-    id: '1',
-    title: 'Presupuesto de Compras excedido',
-    message: 'Has superado el presupuesto de $500 en la categoría Compras por $120.',
-    type: 'warning',
-    isRead: false,
-    time: 'Hace 2 horas',
-    category: 'presupuesto'
-  },
-  {
-    id: '2',
-    title: 'Nueva transacción detectada',
-    message: 'Se registró automáticamente una compra en Amazon por $75.',
-    type: 'info',
-    isRead: false,
-    time: 'Hace 4 horas',
-    category: 'transaccion'
-  },
-  {
-    id: '3',
-    title: 'Categorización automática completada',
-    message: '15 transacciones fueron categorizadas automáticamente usando reglas.',
-    type: 'success',
-    isRead: true,
-    time: 'Hace 1 día',
-    category: 'sistema'
-  },
-  {
-    id: '4',
-    title: 'Archivo procesado exitosamente',
-    message: 'El estado de cuenta "enero-2024.pdf" fue procesado. 25 transacciones añadidas.',
-    type: 'success',
-    isRead: true,
-    time: 'Hace 2 días',
-    category: 'archivo'
-  },
-  {
-    id: '5',
-    title: 'Invitación a equipo pendiente',
-    message: 'María García ha sido invitada al equipo "Familia García".',
-    type: 'info',
-    isRead: true,
-    time: 'Hace 3 días',
-    category: 'equipo'
-  },
-];
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 
 export default function NotificationsPage() {
   const cardBg = useColorModeValue('white', 'gray.700');
   const unreadBg = useColorModeValue('blue.50', 'blue.900');
+  const toast = useToast();
+  const queryClient = useQueryClient();
+
+  // Fetch notifications
+  const { data: notifications = [], isLoading, error } = useQuery({
+    queryKey: ['notifications'],
+    queryFn: async () => {
+      const response = await fetch('/api/notifications');
+      if (!response.ok) {
+        throw new Error('Failed to fetch notifications');
+      }
+      return response.json();
+    },
+  });
+
+  // Mark single notification as read
+  const markAsReadMutation = useMutation({
+    mutationFn: async (notificationId: string) => {
+      const response = await fetch(`/api/notifications/${notificationId}/read`, {
+        method: 'PUT',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to mark notification as read');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      toast({
+        title: 'Notificación marcada como leída',
+        status: 'success',
+        duration: 2000,
+      });
+    },
+    onError: () => {
+      toast({
+        title: 'Error al marcar notificación',
+        description: 'No se pudo marcar la notificación como leída',
+        status: 'error',
+        duration: 3000,
+      });
+    },
+  });
+
+  // Mark all notifications as read
+  const markAllAsReadMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch('/api/notifications/read-all', {
+        method: 'PUT',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to mark all notifications as read');
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      toast({
+        title: `${data.count} notificaciones marcadas como leídas`,
+        status: 'success',
+        duration: 2000,
+      });
+    },
+    onError: () => {
+      toast({
+        title: 'Error al marcar notificaciones',
+        description: 'No se pudieron marcar todas las notificaciones como leídas',
+        status: 'error',
+        duration: 3000,
+      });
+    },
+  });
 
   const getNotificationColor = (type: string) => {
     switch (type) {
@@ -76,18 +105,68 @@ export default function NotificationsPage() {
     }
   };
 
-  const getCategoryIcon = (category: string) => {
-    switch (category) {
-      case 'presupuesto': return '💰';
-      case 'transaccion': return '💳';
-      case 'sistema': return '⚙️';
-      case 'archivo': return '📄';
-      case 'equipo': return '👥';
+  const getCategoryIcon = (type: string) => {
+    switch (type) {
+      case 'budget_alert': return '💰';
+      case 'transaction_alert': return '💳';
+      case 'system': return '⚙️';
+      case 'file_processed': return '📄';
+      case 'team_activity': return '👥';
       default: return '📋';
     }
   };
 
-  const unreadCount = mockNotifications.filter(n => !n.isRead).length;
+  const formatTimeAgo = (dateString: string) => {
+    const now = new Date();
+    const date = new Date(dateString);
+    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+    if (diffInSeconds < 60) return 'Hace menos de un minuto';
+    if (diffInSeconds < 3600) return `Hace ${Math.floor(diffInSeconds / 60)} minutos`;
+    if (diffInSeconds < 86400) return `Hace ${Math.floor(diffInSeconds / 3600)} horas`;
+    if (diffInSeconds < 604800) return `Hace ${Math.floor(diffInSeconds / 86400)} días`;
+    return date.toLocaleDateString('es-ES');
+  };
+
+  const handleNotificationClick = (notification: any) => {
+    if (!notification.isRead) {
+      markAsReadMutation.mutate(notification.id);
+    }
+  };
+
+  const unreadCount = notifications.filter((n: any) => !n.isRead).length;
+
+  if (isLoading) {
+    return (
+      <Box>
+        <Navigation />
+        <Container maxW="4xl" py={8}>
+          <Center py={12}>
+            <VStack spacing={4}>
+              <Spinner size="xl" color="blue.500" />
+              <Text color="gray.600">Cargando notificaciones...</Text>
+            </VStack>
+          </Center>
+        </Container>
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Box>
+        <Navigation />
+        <Container maxW="4xl" py={8}>
+          <Center py={12}>
+            <VStack spacing={4}>
+              <Text fontSize="xl" color="red.500">Error al cargar notificaciones</Text>
+              <Text color="gray.600">Inténtalo de nuevo más tarde</Text>
+            </VStack>
+          </Center>
+        </Container>
+      </Box>
+    );
+  }
 
   return (
     <Box>
@@ -107,17 +186,20 @@ export default function NotificationsPage() {
               <Badge colorScheme="red" fontSize="sm">
                 {unreadCount} sin leer
               </Badge>
-              <Button size="sm" leftIcon={<FaCheck />}>
-                Marcar como leídas
-              </Button>
-              <Button size="sm" variant="outline" leftIcon={<FaCheckDouble />}>
-                Marcar todas
+              <Button 
+                size="sm" 
+                leftIcon={<FaCheckDouble />}
+                onClick={() => markAllAsReadMutation.mutate()}
+                isLoading={markAllAsReadMutation.isPending}
+                isDisabled={unreadCount === 0}
+              >
+                Marcar todas como leídas
               </Button>
             </HStack>
           </HStack>
 
           <VStack spacing={3}>
-            {mockNotifications.map((notification) => (
+            {notifications.map((notification: any) => (
               <Card 
                 key={notification.id} 
                 bg={notification.isRead ? cardBg : unreadBg} 
@@ -126,6 +208,7 @@ export default function NotificationsPage() {
                 _hover={{ shadow: 'md' }}
                 border={notification.isRead ? 'none' : '1px'}
                 borderColor={notification.isRead ? 'transparent' : 'blue.200'}
+                onClick={() => handleNotificationClick(notification)}
               >
                 <CardBody>
                   <HStack spacing={4} align="start">
@@ -134,7 +217,7 @@ export default function NotificationsPage() {
                       bg={`${getNotificationColor(notification.type)}.500`}
                       color="white"
                     >
-                      {getCategoryIcon(notification.category)}
+                      {getCategoryIcon(notification.type)}
                     </Avatar>
                     
                     <VStack align="start" spacing={2} flex={1}>
@@ -155,11 +238,11 @@ export default function NotificationsPage() {
                       </HStack>
                       
                       <Text fontSize="sm" color="gray.600">
-                        {notification.message}
+                        {notification.body}
                       </Text>
                       
                       <Text fontSize="xs" color="gray.500">
-                        {notification.time}
+                        {formatTimeAgo(notification.createdAt)}
                       </Text>
                     </VStack>
                   </HStack>
@@ -168,7 +251,7 @@ export default function NotificationsPage() {
             ))}
           </VStack>
 
-          {mockNotifications.length === 0 && (
+          {notifications.length === 0 && (
             <Card bg={cardBg}>
               <CardBody>
                 <VStack spacing={4} py={8}>

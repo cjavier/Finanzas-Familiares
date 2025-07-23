@@ -21,6 +21,7 @@ import {
 import { HamburgerIcon, CloseIcon, BellIcon } from '@chakra-ui/icons';
 import { useLocation } from 'wouter';
 import { useAuth } from '@/hooks/use-auth';
+import { useQuery } from '@tanstack/react-query';
 import { 
   FaHome, 
   FaExchangeAlt, 
@@ -74,6 +75,21 @@ export default function Navigation() {
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [, navigate] = useLocation();
   const { logoutMutation } = useAuth();
+
+  // Fetch notifications to show unread count
+  const { data: notifications = [] } = useQuery({
+    queryKey: ['notifications'],
+    queryFn: async () => {
+      const response = await fetch('/api/notifications');
+      if (!response.ok) {
+        throw new Error('Failed to fetch notifications');
+      }
+      return response.json();
+    },
+    refetchInterval: 30000, // Refetch every 30 seconds
+  });
+
+  const unreadCount = notifications.filter((n: any) => !n.isRead).length;
 
   const handleLogout = () => {
     logoutMutation.mutate(undefined, {
@@ -135,27 +151,31 @@ export default function Navigation() {
               </Button>
 
               {/* Notifications */}
-              <Menu>
-                <MenuButton
-                  as={IconButton}
+              <Box position="relative">
+                <IconButton
                   aria-label={'Notificaciones'}
                   icon={<BellIcon />}
                   variant={'ghost'}
-                  position={'relative'}
                   onClick={() => navigate('/notifications')}
-                >
+                />
+                {unreadCount > 0 && (
                   <Badge
                     colorScheme="red"
                     position="absolute"
-                    top="0"
-                    right="0"
+                    top="-1"
+                    right="-1"
                     fontSize="xs"
                     borderRadius="full"
+                    minW="20px"
+                    h="20px"
+                    display="flex"
+                    alignItems="center"
+                    justifyContent="center"
                   >
-                    3
+                    {unreadCount > 99 ? '99+' : unreadCount}
                   </Badge>
-                </MenuButton>
-              </Menu>
+                )}
+              </Box>
 
               {/* User Menu */}
               <Menu>

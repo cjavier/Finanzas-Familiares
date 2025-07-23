@@ -51,11 +51,14 @@ export const files = pgTable("files", {
   id: uuid("id").primaryKey().defaultRandom(),
   teamId: uuid("team_id").references(() => teams.id).notNull(),
   userId: uuid("user_id").references(() => users.id).notNull(),
-  fileType: text("file_type", { enum: ["pdf", "excel", "image", "other"] }).notNull(),
-  filePath: text("file_path").notNull(),
-  originalName: text("original_name").notNull(),
-  status: text("status", { enum: ["processing", "processed", "error"] }).default("processing").notNull(),
+  filename: text("filename").notNull(),
+  mimetype: text("mimetype").notNull(),
+  size: text("size").notNull(),
+  path: text("path").notNull(),
+  status: text("status", { enum: ["uploaded", "processing", "completed", "error"] }).default("uploaded").notNull(),
   processedAt: timestamp("processed_at"),
+  transactionCount: text("transaction_count"),
+  errorMessage: text("error_message"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -68,7 +71,7 @@ export const transactions = pgTable("transactions", {
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
   description: text("description").notNull(),
   date: date("date").notNull(),
-  source: text("source", { enum: ["manual", "statement", "ticket", "ocr"] }).default("manual").notNull(),
+  source: text("source", { enum: ["manual", "statement", "ticket", "ocr", "file"] }).default("manual").notNull(),
   status: text("status", { enum: ["active", "deleted", "pending"] }).default("active").notNull(),
   fileId: uuid("file_id").references(() => files.id),
   isAiSuggested: boolean("is_ai_suggested").default(false).notNull(),
@@ -113,6 +116,16 @@ export const transactionAuditLog = pgTable("transaction_audit_log", {
   changedAt: timestamp("changed_at").defaultNow().notNull(),
 });
 
+export const conversations = pgTable("conversations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  teamId: uuid("team_id").references(() => teams.id).notNull(),
+  userId: uuid("user_id").references(() => users.id).notNull(),
+  message: text("message").notNull(),
+  response: text("response").notNull(),
+  context: jsonb("context"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Relations
 export const teamsRelations = relations(teams, ({ many }) => ({
   users: many(users),
@@ -122,6 +135,7 @@ export const teamsRelations = relations(teams, ({ many }) => ({
   files: many(files),
   rules: many(rules),
   notifications: many(notifications),
+  conversations: many(conversations),
 }));
 
 export const usersRelations = relations(users, ({ one, many }) => ({
@@ -133,6 +147,7 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   files: many(files),
   notifications: many(notifications),
   auditLogs: many(transactionAuditLog),
+  conversations: many(conversations),
 }));
 
 export const categoriesRelations = relations(categories, ({ one, many }) => ({
@@ -230,6 +245,17 @@ export const transactionAuditLogRelations = relations(transactionAuditLog, ({ on
   }),
 }));
 
+export const conversationsRelations = relations(conversations, ({ one }) => ({
+  team: one(teams, {
+    fields: [conversations.teamId],
+    references: [teams.id],
+  }),
+  user: one(users, {
+    fields: [conversations.userId],
+    references: [users.id],
+  }),
+}));
+
 // Insert schemas
 export const insertTeamSchema = createInsertSchema(teams).omit({
   id: true,
@@ -296,6 +322,13 @@ export const insertTransactionAuditLogSchema = createInsertSchema(transactionAud
   changedAt: true,
 });
 
+export const insertConversationSchema = createInsertSchema(conversations).omit({
+  id: true,
+  createdAt: true,
+  teamId: true,
+  userId: true,
+});
+
 // Types
 export type Team = typeof teams.$inferSelect;
 export type InsertTeam = z.infer<typeof insertTeamSchema>;
@@ -315,3 +348,5 @@ export type Notification = typeof notifications.$inferSelect;
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 export type TransactionAuditLog = typeof transactionAuditLog.$inferSelect;
 export type InsertTransactionAuditLog = z.infer<typeof insertTransactionAuditLogSchema>;
+export type Conversation = typeof conversations.$inferSelect;
+export type InsertConversation = z.infer<typeof insertConversationSchema>;

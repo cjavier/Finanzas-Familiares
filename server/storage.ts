@@ -1,12 +1,13 @@
 import { 
-  users, teams, transactions, categories, budgets, files, rules, notifications, transactionAuditLog,
+  users, teams, transactions, categories, budgets, files, rules, notifications, transactionAuditLog, conversations,
   type User, type InsertUser, type Team, type Transaction, type InsertTransaction,
   type Category, type InsertCategory, type Budget, type InsertBudget,
   type File, type InsertFile, type Rule, type InsertRule,
-  type Notification, type InsertNotification, type TransactionAuditLog, type InsertTransactionAuditLog
+  type Notification, type InsertNotification, type TransactionAuditLog, type InsertTransactionAuditLog,
+  type Conversation, type InsertConversation
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, gte, lte, isNull, or, sum, sql } from "drizzle-orm";
+import { eq, and, desc, gte, lte, isNull, or, sum, sql, like } from "drizzle-orm";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
 import { pool } from "./db";
@@ -49,11 +50,11 @@ export interface IStorage {
   getBudgetAnalytics(teamId: string): Promise<any[]>;
   
   // Transaction methods
-  getTransactions(teamId: string, filters?: { categoryId?: string; fromDate?: string; toDate?: string; status?: string }): Promise<Transaction[]>;
+  getTransactions(teamId: string, filters?: { categoryId?: string; fromDate?: string; toDate?: string; status?: string; search?: string; page?: number; limit?: number }): Promise<Transaction[]>;
   getTransaction(id: string, teamId: string): Promise<Transaction | undefined>;
   createTransaction(transaction: InsertTransaction & { teamId: string; userId: string }): Promise<Transaction>;
-  updateTransaction(id: string, transaction: Partial<InsertTransaction>): Promise<Transaction | undefined>;
-  deleteTransaction(id: string, teamId: string): Promise<boolean>;
+  updateTransaction(id: string, transaction: Partial<InsertTransaction>, userId?: string): Promise<Transaction | undefined>;
+  deleteTransaction(id: string, teamId: string, userId?: string): Promise<boolean>;
   
   // File methods
   getFiles(teamId: string): Promise<File[]>;
@@ -68,6 +69,7 @@ export interface IStorage {
   createRule(rule: InsertRule & { teamId: string }): Promise<Rule>;
   updateRule(id: string, rule: Partial<InsertRule>): Promise<Rule | undefined>;
   deleteRule(id: string, teamId: string): Promise<boolean>;
+  applyRulesToTransactions(teamId: string, userId: string): Promise<{ categorizedCount: number; totalProcessed: number; details: any[] }>;
   
   // Notification methods
   getNotifications(teamId: string, userId?: string): Promise<Notification[]>;
@@ -79,6 +81,13 @@ export interface IStorage {
   // Audit log methods
   getTransactionAuditLog(transactionId: string): Promise<TransactionAuditLog[]>;
   createAuditLog(auditLog: InsertTransactionAuditLog): Promise<TransactionAuditLog>;
+  
+  // Conversation methods
+  getConversations(teamId: string, userId: string, limit?: number): Promise<Conversation[]>;
+  createConversation(conversation: InsertConversation & { teamId: string; userId: string }): Promise<Conversation>;
+  
+  // Notification helpers
+  createTeamActivityNotification(teamId: string, activityType: string, details: { [key: string]: any }): Promise<void>;
   
   sessionStore: session.Store;
 }
@@ -132,6 +141,14 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
     
+    // Create team activity notification for new member (only if joining existing team)
+    if (inviteCode) {
+      await this.createTeamActivityNotification(team.id, 'member_joined', {
+        memberName: user.name,
+        role: user.role
+      });
+    }
+    
     return user;
   }
 
@@ -167,14 +184,35 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(users.id, userId), eq(users.teamId, teamId)))
       .returning();
     
+    // Create team activity notification for role change
+    if (user) {
+      await this.createTeamActivityNotification(teamId, 'member_role_changed', {
+        memberName: user.name,
+        newRole: role
+      });
+    }
+    
     return user || undefined;
   }
 
   async removeUserFromTeam(userId: string, teamId: string): Promise<boolean> {
+    // Get user info before removing for notification
+    const [userToRemove] = await db
+      .select()
+      .from(users)
+      .where(and(eq(users.id, userId), eq(users.teamId, teamId)));
+
     const result = await db
       .update(users)
       .set({ isActive: false, updatedAt: new Date() })
       .where(and(eq(users.id, userId), eq(users.teamId, teamId)));
+    
+    // Create team activity notification for member removal
+    if ((result.rowCount ?? 0) > 0 && userToRemove) {
+      await this.createTeamActivityNotification(teamId, 'member_removed', {
+        memberName: userToRemove.name
+      });
+    }
     
     return (result.rowCount ?? 0) > 0;
   }
@@ -214,6 +252,13 @@ export class DatabaseStorage implements IStorage {
       .where(eq(teams.id, id))
       .returning();
     
+    // Create team activity notification for team update
+    if (team) {
+      await this.createTeamActivityNotification(id, 'team_updated', {
+        changes: teamData.name ? `Nombre cambiado a "${teamData.name}".` : ''
+      });
+    }
+    
     return team || undefined;
   }
 
@@ -225,10 +270,15 @@ export class DatabaseStorage implements IStorage {
       .where(eq(teams.id, teamId))
       .returning();
     
+    // Create team activity notification for invite code regeneration
+    if (team) {
+      await this.createTeamActivityNotification(teamId, 'invite_code_regenerated', {});
+    }
+    
     return team || undefined;
   }
 
-  async getTransactions(teamId: string, filters?: { categoryId?: string; fromDate?: string; toDate?: string; status?: string }): Promise<Transaction[]> {
+  async getTransactions(teamId: string, filters?: { categoryId?: string; fromDate?: string; toDate?: string; status?: string; search?: string; page?: number; limit?: number }): Promise<Transaction[]> {
     const conditions = [eq(transactions.teamId, teamId)];
     
     if (filters?.categoryId) {
@@ -245,11 +295,24 @@ export class DatabaseStorage implements IStorage {
     
     if (filters?.status) {
       conditions.push(eq(transactions.status, filters.status as "active" | "deleted" | "pending"));
+    } else {
+      // Default to showing only active transactions
+      conditions.push(eq(transactions.status, "active"));
     }
+    
+    if (filters?.search) {
+      conditions.push(like(transactions.description, `%${filters.search}%`));
+    }
+    
+    const pageNumber = filters?.page || 1;
+    const pageSize = filters?.limit || 50;
+    const offsetValue = (pageNumber - 1) * pageSize;
     
     return db.select().from(transactions)
       .where(and(...conditions))
-      .orderBy(desc(transactions.date));
+      .orderBy(desc(transactions.date))
+      .limit(pageSize)
+      .offset(offsetValue);
   }
 
   async getTransaction(id: string, teamId: string): Promise<Transaction | undefined> {
@@ -262,29 +325,113 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createTransaction(transaction: InsertTransaction & { teamId: string; userId: string }): Promise<Transaction> {
+    // First, try to apply rules to categorize the transaction automatically
+    let finalTransaction = { ...transaction };
+    
+    // Get active rules for the team
+    const activeRules = await db
+      .select()
+      .from(rules)
+      .where(and(eq(rules.teamId, transaction.teamId), eq(rules.isActive, true)));
+
+    // Apply rules to find a matching category
+    for (const rule of activeRules) {
+      let matches = false;
+
+      switch (rule.field) {
+        case 'description':
+          matches = transaction.description.toLowerCase().includes(rule.matchText.toLowerCase());
+          break;
+        case 'amount':
+          const ruleAmount = parseFloat(rule.matchText);
+          const transactionAmount = parseFloat(transaction.amount);
+          matches = Math.abs(transactionAmount) === ruleAmount;
+          break;
+        case 'date':
+          matches = transaction.date.includes(rule.matchText);
+          break;
+      }
+
+      if (matches) {
+        finalTransaction.categoryId = rule.categoryId;
+        finalTransaction.isAiSuggested = true;
+        break; // First match wins
+      }
+    }
+
     const [newTransaction] = await db
       .insert(transactions)
-      .values(transaction)
+      .values(finalTransaction)
       .returning();
+    
+    // Create audit log for transaction creation
+    await this.createAuditLog({
+      transactionId: newTransaction.id,
+      userId: transaction.userId,
+      changeType: 'created',
+      newValue: newTransaction,
+    });
+
+    // Check for budget alerts after creating transaction
+    await this.checkBudgetAlertsAndNotify(transaction.teamId);
+
+    // Create transaction alert if needed
+    await this.createTransactionAlert(newTransaction, transaction.userId);
     
     return newTransaction;
   }
 
-  async updateTransaction(id: string, transaction: Partial<InsertTransaction>): Promise<Transaction | undefined> {
+  async updateTransaction(id: string, transactionData: Partial<InsertTransaction>, userId?: string): Promise<Transaction | undefined> {
+    // Get the original transaction for audit logging
+    const [originalTransaction] = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.id, id));
+    
     const [updatedTransaction] = await db
       .update(transactions)
-      .set({ ...transaction, updatedAt: new Date() })
+      .set({ ...transactionData, updatedAt: new Date() })
       .where(eq(transactions.id, id))
       .returning();
+    
+    // Create audit log for transaction update
+    if (updatedTransaction && originalTransaction && userId) {
+      await this.createAuditLog({
+        transactionId: updatedTransaction.id,
+        userId: userId,
+        changeType: 'updated',
+        oldValue: originalTransaction,
+        newValue: updatedTransaction,
+      });
+
+      // Check for budget alerts after updating transaction
+      await this.checkBudgetAlertsAndNotify(updatedTransaction.teamId);
+    }
     
     return updatedTransaction || undefined;
   }
 
-  async deleteTransaction(id: string, teamId: string): Promise<boolean> {
+  async deleteTransaction(id: string, teamId: string, userId?: string): Promise<boolean> {
+    // Get the original transaction for audit logging
+    const [originalTransaction] = await db
+      .select()
+      .from(transactions)
+      .where(and(eq(transactions.id, id), eq(transactions.teamId, teamId)));
+    
     const result = await db
       .update(transactions)
       .set({ status: "deleted", updatedAt: new Date() })
       .where(and(eq(transactions.id, id), eq(transactions.teamId, teamId)));
+    
+    // Create audit log for transaction deletion
+    if (originalTransaction && userId && (result.rowCount ?? 0) > 0) {
+      await this.createAuditLog({
+        transactionId: originalTransaction.id,
+        userId: userId,
+        changeType: 'deleted',
+        oldValue: originalTransaction,
+      });
+    }
     
     return (result.rowCount ?? 0) > 0;
   }
@@ -556,6 +703,105 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
+  async applyRulesToTransactions(teamId: string, userId: string): Promise<{ categorizedCount: number; totalProcessed: number; details: any[] }> {
+    // Get active rules for the team
+    const activeRules = await db
+      .select()
+      .from(rules)
+      .where(and(eq(rules.teamId, teamId), eq(rules.isActive, true)));
+
+    if (activeRules.length === 0) {
+      return { categorizedCount: 0, totalProcessed: 0, details: [] };
+    }
+
+    // Get uncategorized transactions (or transactions that could be re-categorized)
+    const uncategorizedTransactions = await db
+      .select()
+      .from(transactions)
+      .where(and(
+        eq(transactions.teamId, teamId),
+        eq(transactions.status, 'active')
+      ));
+
+    let categorizedCount = 0;
+    const details: any[] = [];
+
+    for (const transaction of uncategorizedTransactions) {
+      let matchedRule: Rule | null = null;
+
+      // Apply rules in order, first match wins
+      for (const rule of activeRules) {
+        let matches = false;
+
+        switch (rule.field) {
+          case 'description':
+            matches = transaction.description.toLowerCase().includes(rule.matchText.toLowerCase());
+            break;
+          case 'amount':
+            // For amount matching, we expect the rule to specify a range or exact amount
+            const ruleAmount = parseFloat(rule.matchText);
+            const transactionAmount = parseFloat(transaction.amount);
+            matches = Math.abs(transactionAmount) === ruleAmount;
+            break;
+          case 'date':
+            // For date matching, we expect the rule to specify a date pattern
+            matches = transaction.date.includes(rule.matchText);
+            break;
+        }
+
+        if (matches) {
+          matchedRule = rule;
+          break;
+        }
+      }
+
+      if (matchedRule && transaction.categoryId !== matchedRule.categoryId) {
+        // Update the transaction category
+        const originalCategoryId = transaction.categoryId;
+        await db
+          .update(transactions)
+          .set({ 
+            categoryId: matchedRule.categoryId, 
+            updatedAt: new Date(),
+            isAiSuggested: true  // Mark as auto-categorized
+          })
+          .where(eq(transactions.id, transaction.id));
+
+        // Create audit log for rule-based categorization
+        await this.createAuditLog({
+          transactionId: transaction.id,
+          userId: userId,
+          changeType: 'category_changed',
+          oldValue: { categoryId: originalCategoryId, source: 'manual' },
+          newValue: { categoryId: matchedRule.categoryId, source: 'rule', ruleId: matchedRule.id },
+        });
+
+        categorizedCount++;
+        details.push({
+          transactionId: transaction.id,
+          description: transaction.description,
+          oldCategoryId: originalCategoryId,
+          newCategoryId: matchedRule.categoryId,
+          ruleName: matchedRule.name,
+          rulePattern: matchedRule.matchText
+        });
+      }
+    }
+
+    // Create team activity notification if any transactions were categorized
+    if (categorizedCount > 0) {
+      await this.createTeamActivityNotification(teamId, 'rules_applied', {
+        categorizedCount
+      });
+    }
+
+    return {
+      categorizedCount,
+      totalProcessed: uncategorizedTransactions.length,
+      details
+    };
+  }
+
   // Notification methods
   async getNotifications(teamId: string, userId?: string): Promise<Notification[]> {
     const conditions = [eq(notifications.teamId, teamId)];
@@ -618,6 +864,212 @@ export class DatabaseStorage implements IStorage {
       .returning();
     
     return newAuditLog;
+  }
+
+  async getConversations(teamId: string, userId: string, limit: number = 50): Promise<Conversation[]> {
+    const result = await db
+      .select()
+      .from(conversations)
+      .where(and(
+        eq(conversations.teamId, teamId),
+        eq(conversations.userId, userId)
+      ))
+      .orderBy(desc(conversations.createdAt))
+      .limit(limit);
+    
+    return result;
+  }
+
+  async createConversation(conversation: InsertConversation & { teamId: string; userId: string }): Promise<Conversation> {
+    const [newConversation] = await db
+      .insert(conversations)
+      .values(conversation)
+      .returning();
+    
+    return newConversation;
+  }
+
+  // Helper method to create transaction alert notifications
+  async createTransactionAlert(transaction: Transaction, userId: string): Promise<void> {
+    try {
+      const amount = Math.abs(parseFloat(transaction.amount));
+      
+      // Get recent transactions to calculate average spending
+      const recentTransactions = await db
+        .select()
+        .from(transactions)
+        .where(and(
+          eq(transactions.teamId, transaction.teamId),
+          eq(transactions.status, 'active'),
+          gte(transactions.date, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
+        ))
+        .limit(50);
+
+      if (recentTransactions.length > 5) {
+        const amounts = recentTransactions.map(t => Math.abs(parseFloat(t.amount)));
+        const averageAmount = amounts.reduce((sum, amt) => sum + amt, 0) / amounts.length;
+        
+        // Alert for transactions significantly larger than average (3x or more)
+        if (amount >= averageAmount * 3 && amount > 100) {
+          await this.createNotification({
+            teamId: transaction.teamId,
+            userId,
+            title: 'Transacción inusual detectada',
+            body: `Se registró una transacción de $${amount.toFixed(2)} por "${transaction.description}", que es significativamente mayor al promedio reciente de $${averageAmount.toFixed(2)}.`,
+            type: 'alert',
+            isRead: false,
+          });
+        }
+      }
+
+      // Alert for very large transactions (over $1000)
+      if (amount > 1000) {
+        await this.createNotification({
+          teamId: transaction.teamId,
+          userId,
+          title: 'Transacción de alto valor',
+          body: `Se registró una transacción de alto valor: $${amount.toFixed(2)} por "${transaction.description}".`,
+          type: 'alert',
+          isRead: false,
+        });
+      }
+
+      // Alert for AI-suggested categorizations
+      if (transaction.isAiSuggested) {
+        await this.createNotification({
+          teamId: transaction.teamId,
+          userId,
+          title: 'Transacción categorizada automáticamente',
+          body: `La transacción "${transaction.description}" de $${amount.toFixed(2)} fue categorizada automáticamente usando reglas inteligentes.`,
+          type: 'info',
+          isRead: false,
+        });
+      }
+    } catch (error) {
+      console.error('Error creating transaction alert:', error);
+    }
+  }
+
+  // Helper method to create team activity notifications
+  async createTeamActivityNotification(teamId: string, activityType: string, details: { [key: string]: any }): Promise<void> {
+    try {
+      let title = '';
+      let body = '';
+      
+      switch (activityType) {
+        case 'member_joined':
+          title = 'Nuevo miembro se unió al equipo';
+          body = `${details.memberName} se ha unido al equipo como ${details.role === 'admin' ? 'administrador' : 'miembro'}.`;
+          break;
+        case 'member_role_changed':
+          title = 'Rol de miembro actualizado';
+          body = `El rol de ${details.memberName} ha sido cambiado a ${details.newRole === 'admin' ? 'administrador' : 'miembro'}.`;
+          break;
+        case 'member_removed':
+          title = 'Miembro removido del equipo';
+          body = `${details.memberName} ha sido removido del equipo.`;
+          break;
+        case 'team_updated':
+          title = 'Información del equipo actualizada';
+          body = `La información del equipo ha sido actualizada. ${details.changes || ''}`;
+          break;
+        case 'invite_code_regenerated':
+          title = 'Código de invitación regenerado';
+          body = 'Se ha generado un nuevo código de invitación para el equipo por seguridad.';
+          break;
+        case 'file_processed':
+          title = 'Archivo procesado exitosamente';
+          body = `El archivo "${details.filename}" ha sido procesado. ${details.transactionCount} transacciones fueron extraídas.`;
+          break;
+        case 'rules_applied':
+          title = 'Reglas automáticas aplicadas';
+          body = `Se aplicaron reglas automáticas y se categorizaron ${details.categorizedCount} transacciones.`;
+          break;
+        default:
+          return; // Unknown activity type
+      }
+
+      // Get all team members to notify them
+      const teamMembers = await this.getTeamMembers(teamId);
+      
+      // Create notification for each team member
+      for (const member of teamMembers) {
+        await this.createNotification({
+          teamId,
+          userId: member.id,
+          title,
+          body,
+          type: 'info',
+          isRead: false,
+        });
+      }
+    } catch (error) {
+      console.error('Error creating team activity notification:', error);
+    }
+  }
+
+  // Helper method to check for budget alerts and create notifications
+  async checkBudgetAlertsAndNotify(teamId: string): Promise<void> {
+    try {
+      const budgetAnalytics = await this.getBudgetAnalytics(teamId);
+      
+      for (const budget of budgetAnalytics) {
+        // Check if budget is over or at warning threshold (80%)
+        if (budget.isOverBudget) {
+          const overAmount = Math.abs(budget.spentAmount - budget.budgetAmount);
+          
+          // Check if we already sent a notification for this budget recently (within 24 hours)
+          const recentNotifications = await db
+            .select()
+            .from(notifications)
+            .where(and(
+              eq(notifications.teamId, teamId),
+              eq(notifications.type, 'alert'),
+              gte(notifications.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000))
+            ));
+
+          const hasRecentNotification = recentNotifications.some(n => 
+            n.body.includes(budget.category.name)
+          );
+
+          if (!hasRecentNotification) {
+            await this.createNotification({
+              teamId,
+              title: `Presupuesto de ${budget.category.name} excedido`,
+              body: `Has superado el presupuesto de $${budget.budgetAmount.toFixed(2)} en la categoría ${budget.category.name} por $${overAmount.toFixed(2)}.`,
+              type: 'alert',
+              isRead: false,
+            });
+          }
+        } else if (budget.percentage >= 80) {
+          // Warning threshold notification
+          const recentWarnings = await db
+            .select()
+            .from(notifications)
+            .where(and(
+              eq(notifications.teamId, teamId),
+              eq(notifications.type, 'alert'),
+              gte(notifications.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000))
+            ));
+
+          const hasRecentWarning = recentWarnings.some(n => 
+            n.body.includes(`${budget.category.name}`) && n.body.includes('cerca del límite')
+          );
+
+          if (!hasRecentWarning) {
+            await this.createNotification({
+              teamId,
+              title: `Presupuesto de ${budget.category.name} cerca del límite`,
+              body: `Has gastado el ${budget.percentage.toFixed(1)}% de tu presupuesto de $${budget.budgetAmount.toFixed(2)} en ${budget.category.name}. Quedan $${budget.remaining.toFixed(2)}.`,
+              type: 'alert',
+              isRead: false,
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error checking budget alerts:', error);
+    }
   }
 }
 

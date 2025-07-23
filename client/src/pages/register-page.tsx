@@ -21,6 +21,7 @@ import {
 import { useState } from 'react';
 import { useLocation } from 'wouter';
 import { useAuth } from '@/hooks/use-auth';
+import { translateErrorMessage } from '@/lib/utils';
 
 export default function RegisterPage() {
   const [, navigate] = useLocation();
@@ -68,7 +69,7 @@ export default function RegisterPage() {
         navigate('/onboarding');
       },
       onError: (err) => {
-        setError(err.message || 'Registration failed');
+        setError(translateErrorMessage(err.message) || 'Error al registrar la cuenta');
       },
     });
   };

@@ -15,47 +15,66 @@ import {
   IconButton,
   Divider,
 } from '@chakra-ui/react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Navigation from '@/components/navigation';
 import { FaPaperPlane, FaFile, FaRobot, FaUser } from 'react-icons/fa';
 
-const mockMessages = [
-  {
-    id: '1',
-    type: 'bot',
-    message: '¡Hola! Soy tu asistente de finanzas familiares. Puedo ayudarte a analizar archivos, crear transacciones, categorizar gastos y más. ¿En qué puedo ayudarte hoy?',
-    timestamp: new Date(Date.now() - 60000),
-  },
-  {
-    id: '2',
-    type: 'user',
-    message: 'Hola, quiero subir mi estado de cuenta del banco para que lo analices',
-    timestamp: new Date(Date.now() - 45000),
-  },
-  {
-    id: '3',
-    type: 'bot',
-    message: 'Perfecto, puedes subir tu archivo aquí. Acepto archivos PDF, Excel, CSV e imágenes. Una vez que lo subas, lo analizaré y extraeré todas las transacciones automáticamente.',
-    timestamp: new Date(Date.now() - 30000),
-  },
-  {
-    id: '4',
-    type: 'user',
-    message: 'También me gustaría que me ayudes a categorizar algunas transacciones que no estoy seguro cómo clasificar',
-    timestamp: new Date(Date.now() - 15000),
-  },
-  {
-    id: '5',
-    type: 'bot',
-    message: 'Claro, puedo ayudarte con eso. Puedo revisar tus transacciones sin categorizar y sugerir las categorías más apropiadas basándome en la descripción y el monto. ¿Quieres que busque las transacciones pendientes de clasificar?',
-    timestamp: new Date(Date.now() - 5000),
-  },
-];
+interface ChatMessage {
+  id: string;
+  type: 'user' | 'bot';
+  message: string;
+  timestamp: Date;
+}
 
 export default function AgentePage() {
   const [message, setMessage] = useState('');
-  const [messages, setMessages] = useState(mockMessages);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    // Load conversation history on mount
+    loadConversationHistory();
+    
+    // Add welcome message if no history
+    if (messages.length === 0) {
+      const welcomeMessage: ChatMessage = {
+        id: '1',
+        type: 'bot',
+        message: '¡Hola! Soy tu asistente de finanzas familiares. Puedo ayudarte a analizar archivos, crear transacciones, categorizar gastos y más. ¿En qué puedo ayudarte hoy?',
+        timestamp: new Date(),
+      };
+      setMessages([welcomeMessage]);
+    }
+  }, []);
+
+  const loadConversationHistory = async () => {
+    try {
+      const response = await fetch('/api/agent/history?limit=20');
+      if (response.ok) {
+        const history = await response.json();
+        const chatMessages: ChatMessage[] = [];
+        
+        history.forEach((conv: any) => {
+          chatMessages.push({
+            id: `${conv.id}-user`,
+            type: 'user',
+            message: conv.message,
+            timestamp: new Date(conv.createdAt),
+          });
+          chatMessages.push({
+            id: `${conv.id}-bot`,
+            type: 'bot',
+            message: conv.response,
+            timestamp: new Date(conv.createdAt),
+          });
+        });
+        
+        setMessages(chatMessages.reverse());
+      }
+    } catch (error) {
+      console.error('Error loading conversation history:', error);
+    }
+  };
 
   const cardBg = useColorModeValue('white', 'gray.700');
   const userMsgBg = useColorModeValue('blue.500', 'blue.600');
@@ -64,28 +83,57 @@ export default function AgentePage() {
   const handleSendMessage = async () => {
     if (!message.trim()) return;
 
-    const newUserMessage = {
+    const newUserMessage: ChatMessage = {
       id: Date.now().toString(),
-      type: 'user' as const,
+      type: 'user',
       message: message.trim(),
       timestamp: new Date(),
     };
 
     setMessages(prev => [...prev, newUserMessage]);
+    const currentMessage = message.trim();
     setMessage('');
     setIsLoading(true);
 
-    // Simulate bot response
-    setTimeout(() => {
-      const botResponse = {
+    try {
+      const response = await fetch('/api/agent/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: currentMessage }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const botResponse: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          type: 'bot',
+          message: data.response,
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, botResponse]);
+      } else {
+        const errorResponse: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          type: 'bot',
+          message: 'Lo siento, hubo un error al procesar tu mensaje. Por favor, inténtalo de nuevo.',
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, errorResponse]);
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+      const errorResponse: ChatMessage = {
         id: (Date.now() + 1).toString(),
-        type: 'bot' as const,
-        message: 'Entiendo tu solicitud. Déjame procesar esa información y te ayudo con lo que necesitas.',
+        type: 'bot',
+        message: 'Lo siento, no pude conectar con el servidor. Verifica tu conexión e inténtalo de nuevo.',
         timestamp: new Date(),
       };
-      setMessages(prev => [...prev, botResponse]);
+      setMessages(prev => [...prev, errorResponse]);
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -96,8 +144,32 @@ export default function AgentePage() {
   };
 
   const handleFileUpload = () => {
-    // TODO: Implement file upload
-    console.log('File upload clicked');
+    // TODO: Implement file upload integration with files page
+    window.location.href = '/files';
+  };
+
+  const handleQuickAction = async (actionType: string) => {
+    let quickMessage = '';
+    
+    switch (actionType) {
+      case 'analyze':
+        quickMessage = 'Analiza mis gastos recientes y dame un resumen de mis patrones de gasto';
+        break;
+      case 'categorize':
+        quickMessage = 'Ayúdame a categorizar mis transacciones sin categorizar';
+        break;
+      case 'rules':
+        quickMessage = 'Crea reglas automáticas basadas en mis transacciones recientes';
+        break;
+      case 'budget':
+        quickMessage = 'Revisa mis presupuestos y dime cómo voy con mis gastos este mes';
+        break;
+      default:
+        return;
+    }
+
+    setMessage(quickMessage);
+    setTimeout(() => handleSendMessage(), 100);
   };
 
   return (
@@ -188,16 +260,16 @@ export default function AgentePage() {
                       <Button size="sm" variant="outline" onClick={handleFileUpload}>
                         📎 Subir archivo
                       </Button>
-                      <Button size="sm" variant="outline">
+                      <Button size="sm" variant="outline" onClick={() => handleQuickAction('analyze')}>
                         📊 Analizar gastos
                       </Button>
-                      <Button size="sm" variant="outline">
+                      <Button size="sm" variant="outline" onClick={() => handleQuickAction('categorize')}>
                         🏷️ Categorizar transacciones
                       </Button>
-                      <Button size="sm" variant="outline">
+                      <Button size="sm" variant="outline" onClick={() => handleQuickAction('rules')}>
                         📋 Crear regla
                       </Button>
-                      <Button size="sm" variant="outline">
+                      <Button size="sm" variant="outline" onClick={() => handleQuickAction('budget')}>
                         💰 Revisar presupuestos
                       </Button>
                     </HStack>

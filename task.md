@@ -261,166 +261,166 @@ This document outlines all the tasks needed to make the application fully functi
 
 ### 6.1 Transaction CRUD Operations
 **Endpoints needed:**
-- `GET /api/transactions` - Get transactions with filters
-  - Query params: categoryId, fromDate, toDate, status, userId, page, limit
+- ✅ `GET /api/transactions` - Get transactions with filters
+  - Query params: categoryId, fromDate, toDate, status, search, page, limit
   - Output: paginated transaction list
-- `POST /api/transactions` - Create transaction
-  - Input: amount, description, categoryId, date, userId
+- ✅ `POST /api/transactions` - Create transaction
+  - Input: amount, description, categoryId, date
   - Output: created transaction
-- `PUT /api/transactions/:id` - Update transaction
+- ✅ `PUT /api/transactions/:id` - Update transaction
   - Input: amount, description, categoryId, date
   - Output: updated transaction
-- `DELETE /api/transactions/:id` - Soft delete transaction
+- ✅ `DELETE /api/transactions/:id` - Soft delete transaction
 
 **Frontend tasks:**
 - ✅ Transaction list UI (transactions-page.tsx)
 - ✅ Add transaction form (add-transaction-page.tsx)
-- Connect to API endpoints
-- Implement filtering and pagination
-- Edit transaction functionality
+- ✅ Connect to API endpoints
+- ✅ Implement filtering and pagination
+- ✅ Edit transaction functionality
 
 **Backend tasks:**
-- Validate transaction data
-- Check team/category ownership
-- Handle soft deletes
-- Maintain audit log
-- Update budget calculations
+- ✅ Validate transaction data
+- ✅ Check team/category ownership
+- ✅ Handle soft deletes
+- ✅ Maintain audit log
+- ✅ Update budget calculations
 
 ### 6.2 Transaction Search and Filtering
 **Frontend tasks:**
 - ✅ Search and filter UI (transactions-page.tsx)
-- Real-time search functionality
-- Advanced filtering options
+- ✅ Real-time search functionality
+- ✅ Advanced filtering options
 
 **Backend tasks:**
-- Implement search queries
-- Optimize database queries
-- Add proper indexing
+- ✅ Implement search queries
+- ✅ Optimize database queries
+- ✅ Add proper indexing
 
 ### 6.3 Transaction Categorization
 **Endpoints needed:**
-- `PUT /api/transactions/:id/categorize` - Recategorize transaction
+- ✅ `PUT /api/transactions/:id/categorize` - Recategorize transaction
   - Input: categoryId
   - Output: updated transaction
 
 **Frontend tasks:**
 - ✅ Recategorization UI (transactions-page.tsx)
-- Bulk categorization features
+- ✅ Bulk categorization features
 
 **Backend tasks:**
-- Update transaction categories
-- Recalculate budget impacts
-- Log category changes
+- ✅ Update transaction categories
+- ✅ Recalculate budget impacts
+- ✅ Log category changes
 
 ## 7. Automated Rules System
 
 ### 7.1 Rules CRUD Operations
 **Endpoints needed:**
-- `GET /api/rules` - Get all rules for team
-- `POST /api/rules` - Create rule
-  - Input: field, pattern, categoryId, isActive
+- ✅ `GET /api/rules` - Get all rules for team
+- ✅ `POST /api/rules` - Create rule
+  - Input: name, field, matchText, categoryId, isActive
   - Output: created rule
-- `PUT /api/rules/:id` - Update rule
-  - Input: field, pattern, categoryId, isActive
+- ✅ `PUT /api/rules/:id` - Update rule
+  - Input: name, field, matchText, categoryId, isActive
   - Output: updated rule
-- `DELETE /api/rules/:id` - Delete rule
+- ✅ `DELETE /api/rules/:id` - Delete rule
 
 **Frontend tasks:**
 - ✅ Rules management UI (rules-page.tsx)
-- Rule creation/editing forms
-- Connect to API endpoints
+- ✅ Rule creation/editing forms
+- ✅ Connect to API endpoints
 
 **Backend tasks:**
-- Validate rule patterns
-- Check category ownership
-- Store rule configurations
+- ✅ Validate rule patterns
+- ✅ Check category ownership
+- ✅ Store rule configurations
 
 ### 7.2 Automatic Categorization
 **Endpoints needed:**
-- `POST /api/transactions/categorize-batch` - Apply rules to uncategorized transactions
+- ✅ `POST /api/transactions/categorize-batch` - Apply rules to uncategorized transactions
 
 **Backend tasks:**
-- Apply rules to new transactions
-- Batch process existing transactions
-- Log auto-categorization results
-- Handle rule conflicts
+- ✅ Apply rules to new transactions
+- ✅ Batch process existing transactions
+- ✅ Log auto-categorization results
+- ✅ Handle rule conflicts
 
 ## 8. File Upload and Processing
 
 ### 8.1 File Upload
 **Endpoints needed:**
-- `POST /api/files/upload` - Upload file
+- ✅ `POST /api/files/upload` - Upload file
   - Input: file (multipart)
   - Output: file record with processing status
 
 **Frontend tasks:**
 - ✅ File upload UI (files-page.tsx, agente-page.tsx)
-- Drag and drop functionality
-- Upload progress indicators
+- ✅ Drag and drop functionality
+- ✅ Upload progress indicators
 
 **Backend tasks:**
-- Handle file uploads
-- Validate file types and sizes
-- Store files securely
-- Create file records
+- ✅ Handle file uploads
+- ✅ Validate file types and sizes
+- ✅ Store files securely
+- ✅ Create file records
 
 ### 8.2 File Processing
 **Endpoints needed:**
-- `GET /api/files` - Get file list with status
-- `GET /api/files/:id/transactions` - Get transactions from processed file
-- `DELETE /api/files/:id` - Delete file and associated transactions
+- ✅ `GET /api/files` - Get file list with status
+- ✅ `GET /api/files/:id/transactions` - Get transactions from processed file
+- ✅ `DELETE /api/files/:id` - Delete file and associated transactions
 
 **Frontend tasks:**
 - ✅ File status display (files-page.tsx)
-- Transaction preview from files
+- ✅ Transaction preview from files
 
 **Backend tasks:**
-- Process PDF, Excel, CSV files
-- Extract transaction data
-- Create transaction records
-- Update file processing status
-- Handle processing errors
+- ✅ Process PDF, Excel, CSV files
+- ✅ Extract transaction data
+- ✅ Create transaction records
+- ✅ Update file processing status
+- ✅ Handle processing errors
 
 ## 9. AI Agent Integration
 
 ### 9.1 Chat Interface
 **Endpoints needed:**
-- `POST /api/agent/chat` - Send message to AI agent
+- ✅ `POST /api/agent/chat` - Send message to AI agent
   - Input: message, context
   - Output: AI response
-- `GET /api/agent/history` - Get chat history
+- ✅ `GET /api/agent/history` - Get chat history
 
 **Frontend tasks:**
 - ✅ Chat interface UI (agente-page.tsx)
-- Message history
-- File upload integration
+- ✅ Message history
+- ✅ File upload integration
 
 **Backend tasks:**
-- Integrate with AI service
-- Maintain chat context
-- Handle AI responses
-- Store conversation history
+- ✅ Integrate with AI service
+- ✅ Maintain chat context
+- ✅ Handle AI responses
+- ✅ Store conversation history
 
 ### 9.2 AI-Powered Features
 **Endpoints needed:**
-- `POST /api/agent/analyze-file` - AI analyze uploaded file
-- `POST /api/agent/suggest-categories` - Get category suggestions
-- `POST /api/agent/create-rules` - Generate rules from patterns
+- ✅ `POST /api/agent/analyze-file` - AI analyze uploaded file
+- ✅ `POST /api/agent/suggest-categories` - Get category suggestions
+- ✅ `POST /api/agent/create-rules` - Generate rules from patterns
 
 **Backend tasks:**
-- Implement AI-powered file analysis
-- Generate categorization suggestions
-- Create automatic rules
-- Provide financial insights
+- ✅ Implement AI-powered file analysis
+- ✅ Generate categorization suggestions
+- ✅ Create automatic rules
+- ✅ Provide financial insights
 
 ## 10. Notifications System
 
 ### 10.1 Notification CRUD
 **Endpoints needed:**
-- `GET /api/notifications` - Get user notifications
-- `PUT /api/notifications/:id/read` - Mark as read
-- `PUT /api/notifications/read-all` - Mark all as read
-- `POST /api/notifications` - Create notification (internal)
+- ✅ `GET /api/notifications` - Get user notifications
+- ✅ `PUT /api/notifications/:id/read` - Mark as read
+- ✅ `PUT /api/notifications/read-all` - Mark all as read
+- ✅ `POST /api/notifications` - Create notification (internal)
 
 **Frontend tasks:**
 - ✅ Notifications center UI (notifications-page.tsx)
@@ -428,17 +428,12 @@ This document outlines all the tasks needed to make the application fully functi
 - Real-time notification updates
 
 **Backend tasks:**
-- Create notification records
-- Send notifications for budget alerts
-- Transaction alerts
-- Team activity notifications
+- ✅ Create notification records
+- ✅ Send notifications for budget alerts
+- ✅ Transaction alerts
+- ✅ Team activity notifications
 
-### 10.2 Real-time Notifications
-**Backend tasks:**
-- Implement WebSocket or Server-Sent Events
-- Push notifications for real-time updates
-- Budget threshold alerts
-- Transaction processing completion
+
 
 ## 11. Dashboard and Analytics
 
@@ -597,3 +592,9 @@ This document outlines all the tasks needed to make the application fully functi
 - Beign able to upload a profile picture on the /profile page
 - Implement email sending in /api/team/invite endpoint for
   email invitations (currently a placeholder implementation)
+  ## Real-time Notifications
+**Backend tasks:**
+- Implement WebSocket or Server-Sent Events
+- Push notifications for real-time updates
+- Budget threshold alerts
+- Transaction processing completion
