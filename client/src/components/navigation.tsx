@@ -32,7 +32,8 @@ import {
   FaChartPie,
   FaRuler,
   FaFile,
-  FaUsers
+  FaUsers,
+  FaWizardsOfTheCoast
 } from 'react-icons/fa';
 
 const Links = [
@@ -40,6 +41,7 @@ const Links = [
   { name: 'Transacciones', href: '/transactions', icon: FaExchangeAlt },
   { name: 'Categorías', href: '/categories', icon: FaTags },
   { name: 'Presupuestos', href: '/budgets', icon: FaChartPie },
+  { name: 'Asistente Rápido', href: '/quick-budget', icon: FaWizardsOfTheCoast },
   { name: 'Reglas', href: '/rules', icon: FaRuler },
   { name: 'Archivos', href: '/files', icon: FaFile },
   { name: 'Equipo', href: '/team', icon: FaUsers },

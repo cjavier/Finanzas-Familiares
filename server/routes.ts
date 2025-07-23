@@ -416,6 +416,78 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
+  // Complete onboarding setup
+  app.post("/api/onboarding/complete", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const user = req.user!;
+      const { selectedCategories, customCategories, budgets } = req.body;
+
+      // Validate input
+      if (!Array.isArray(selectedCategories)) {
+        return res.status(400).json({ message: "Selected categories must be an array" });
+      }
+
+      // Create custom categories first
+      const createdCategories = [];
+      if (Array.isArray(customCategories) && customCategories.length > 0) {
+        for (const customCategory of customCategories) {
+          if (customCategory.name && customCategory.name.trim()) {
+            const category = await storage.createCategory({
+              name: customCategory.name.trim(),
+              icon: customCategory.icon || 'FaMoneyBillWave',
+              color: customCategory.color || 'purple',
+              teamId: user.teamId,
+            });
+            createdCategories.push(category);
+          }
+        }
+      }
+
+      // Get existing categories that match selected ones
+      const existingCategories = await storage.getCategories(user.teamId);
+      const selectedExistingCategories = existingCategories.filter(cat => 
+        selectedCategories.includes(cat.name)
+      );
+
+      // Create budgets for selected categories
+      const createdBudgets = [];
+      if (budgets && typeof budgets === 'object') {
+        const allCategories = [...selectedExistingCategories, ...createdCategories];
+        
+        for (const category of allCategories) {
+          const budgetAmount = budgets[category.name];
+          if (budgetAmount && budgetAmount > 0) {
+            const budget = await storage.createBudget({
+              categoryId: category.id,
+              amount: budgetAmount.toString(),
+              period: 'monthly',
+              startDate: new Date().toISOString().split('T')[0], // Current date
+              teamId: user.teamId,
+            });
+            createdBudgets.push(budget);
+          }
+        }
+      }
+
+      res.json({
+        success: true,
+        message: "Onboarding completed successfully",
+        data: {
+          categoriesCreated: createdCategories.length,
+          budgetsCreated: createdBudgets.length,
+          totalSelectedCategories: selectedCategories.length
+        }
+      });
+    } catch (error) {
+      console.error("Error completing onboarding:", error);
+      res.status(500).json({ message: "Failed to complete onboarding setup" });
+    }
+  });
+
   // Get categories for user's team
   app.get("/api/categories", async (req, res) => {
     if (!req.isAuthenticated()) {
@@ -1439,6 +1511,402 @@ export function registerRoutes(app: Express): Server {
       res.status(500).json({ message: "Failed to create rules" });
     }
   });
+
+  // Dashboard Analytics endpoints
+  app.get("/api/dashboard", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const user = req.user!;
+      
+      // Get dashboard summary data
+      const [
+        team,
+        recentTransactions,
+        categories,
+        budgets,
+        notifications
+      ] = await Promise.all([
+        storage.getTeam(user.teamId),
+        storage.getTransactions(user.teamId, { limit: 10 }),
+        storage.getCategories(user.teamId),
+        storage.getBudgets(user.teamId),
+        storage.getNotifications(user.teamId, user.id)
+      ]);
+
+      if (!team) {
+        return res.status(404).json({ message: "Team not found" });
+      }
+
+      // Calculate summary statistics
+      const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+      const monthlyTransactions = await storage.getTransactions(user.teamId, {
+        fromDate: `${currentMonth}-01`,
+        toDate: `${currentMonth}-31`
+      });
+
+      const totalIncome = monthlyTransactions
+        .filter(t => parseFloat(t.amount) > 0)
+        .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+
+      const totalExpenses = monthlyTransactions
+        .filter(t => parseFloat(t.amount) < 0)
+        .reduce((sum, t) => sum + Math.abs(parseFloat(t.amount)), 0);
+
+      const netFlow = totalIncome - totalExpenses;
+
+      // Calculate budget analytics
+      const budgetSummary = await calculateBudgetSummary(user.teamId, budgets, currentMonth);
+
+      // Get unread notifications count
+      const unreadNotifications = notifications.filter(n => !n.isRead).length;
+
+      // Get spending by category for current month
+      const spendingByCategory = await calculateSpendingByCategory(user.teamId, currentMonth);
+
+      const dashboard = {
+        summary: {
+          totalIncome,
+          totalExpenses,
+          netFlow,
+          transactionCount: monthlyTransactions.length
+        },
+        budgets: budgetSummary,
+        recentTransactions: recentTransactions.slice(0, 5),
+        notifications: {
+          unread: unreadNotifications,
+          recent: notifications.slice(0, 3)
+        },
+        spendingByCategory,
+        alerts: generateAlerts(budgetSummary, spendingByCategory)
+      };
+
+      res.json(dashboard);
+    } catch (error) {
+      console.error("Error fetching dashboard data:", error);
+      res.status(500).json({ message: "Failed to fetch dashboard data" });
+    }
+  });
+
+  app.get("/api/analytics/spending", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const user = req.user!;
+      const { period = 'month', months = 6 } = req.query;
+
+      // Calculate spending analytics for the specified period
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setMonth(endDate.getMonth() - parseInt(months.toString()));
+
+      const transactions = await storage.getTransactions(user.teamId, {
+        fromDate: startDate.toISOString().split('T')[0],
+        toDate: endDate.toISOString().split('T')[0]
+      });
+
+      const analytics = calculateSpendingAnalytics(transactions, period.toString());
+      res.json(analytics);
+    } catch (error) {
+      console.error("Error fetching spending analytics:", error);
+      res.status(500).json({ message: "Failed to fetch spending analytics" });
+    }
+  });
+
+  app.get("/api/analytics/trends", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const user = req.user!;
+      const { period = 'month', months = 12 } = req.query;
+
+      // Get trend data for the specified period
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setMonth(endDate.getMonth() - parseInt(months.toString()));
+
+      const transactions = await storage.getTransactions(user.teamId, {
+        fromDate: startDate.toISOString().split('T')[0],
+        toDate: endDate.toISOString().split('T')[0]
+      });
+
+      const trends = calculateSpendingTrends(transactions, period.toString());
+      res.json(trends);
+    } catch (error) {
+      console.error("Error fetching spending trends:", error);
+      res.status(500).json({ message: "Failed to fetch spending trends" });
+    }
+  });
+
+  app.get("/api/analytics/categories", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const user = req.user!;
+      const { period = 'month', months = 3 } = req.query;
+
+      // Get category breakdown for the specified period
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setMonth(endDate.getMonth() - parseInt(months.toString()));
+
+      const [transactions, categories] = await Promise.all([
+        storage.getTransactions(user.teamId, {
+          fromDate: startDate.toISOString().split('T')[0],
+          toDate: endDate.toISOString().split('T')[0]
+        }),
+        storage.getCategories(user.teamId)
+      ]);
+
+      const categoryBreakdown = calculateCategoryBreakdown(transactions, categories);
+      res.json(categoryBreakdown);
+    } catch (error) {
+      console.error("Error fetching category analytics:", error);
+      res.status(500).json({ message: "Failed to fetch category analytics" });
+    }
+  });
+
+  // Helper functions for dashboard analytics
+  interface BudgetSummary {
+    totalBudget: number;
+    totalSpent: number;
+    overBudgetCategories: number;
+    underBudgetCategories: number;
+    categories: Array<{
+      categoryId: string;
+      budgetAmount: number;
+      spentAmount: number;
+      percentage: number;
+      isOverBudget: boolean;
+    }>;
+  }
+
+  async function calculateBudgetSummary(teamId: string, budgets: any[], month: string): Promise<BudgetSummary> {
+    const summary: BudgetSummary = {
+      totalBudget: 0,
+      totalSpent: 0,
+      overBudgetCategories: 0,
+      underBudgetCategories: 0,
+      categories: []
+    };
+
+    for (const budget of budgets) {
+      const spent = await calculateCategorySpending(teamId, budget.categoryId, month);
+      const budgetAmount = parseFloat(budget.amount);
+      const spentAmount = Math.abs(spent);
+      const percentage = budgetAmount > 0 ? (spentAmount / budgetAmount) * 100 : 0;
+
+      summary.totalBudget += budgetAmount;
+      summary.totalSpent += spentAmount;
+
+      if (spentAmount > budgetAmount) {
+        summary.overBudgetCategories++;
+      } else {
+        summary.underBudgetCategories++;
+      }
+
+      summary.categories.push({
+        categoryId: budget.categoryId,
+        budgetAmount,
+        spentAmount,
+        percentage,
+        isOverBudget: spentAmount > budgetAmount
+      });
+    }
+
+    return summary;
+  }
+
+  async function calculateCategorySpending(teamId: string, categoryId: string, month: string) {
+    const transactions = await storage.getTransactions(teamId, {
+      categoryId,
+      fromDate: `${month}-01`,
+      toDate: `${month}-31`
+    });
+
+    return transactions
+      .filter(t => parseFloat(t.amount) < 0) // Only expenses
+      .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+  }
+
+  async function calculateSpendingByCategory(teamId: string, month: string) {
+    const [transactions, categories] = await Promise.all([
+      storage.getTransactions(teamId, {
+        fromDate: `${month}-01`,
+        toDate: `${month}-31`
+      }),
+      storage.getCategories(teamId)
+    ]);
+
+    const categorySpending: Record<string, number> = {};
+    
+    transactions.forEach(transaction => {
+      const amount = parseFloat(transaction.amount);
+      if (amount < 0) { // Only count expenses
+        const categoryId = transaction.categoryId;
+        if (!categorySpending[categoryId]) {
+          categorySpending[categoryId] = 0;
+        }
+        categorySpending[categoryId] += Math.abs(amount);
+      }
+    });
+
+    return categories.map(category => ({
+      id: category.id,
+      name: category.name,
+      icon: category.icon,
+      color: category.color,
+      amount: categorySpending[category.id] || 0
+    })).sort((a, b) => b.amount - a.amount);
+  }
+
+  interface Alert {
+    type: string;
+    severity: string;
+    message: string;
+    data: any;
+  }
+
+  function generateAlerts(budgetSummary: any, spendingByCategory: any[]): Alert[] {
+    const alerts: Alert[] = [];
+
+    // Budget alerts
+    budgetSummary.categories.forEach((category: any) => {
+      if (category.isOverBudget) {
+        alerts.push({
+          type: 'budget_exceeded',
+          severity: 'high',
+          message: `Budget exceeded for category ${category.categoryId}`,
+          data: category
+        });
+      } else if (category.percentage > 80) {
+        alerts.push({
+          type: 'budget_warning',
+          severity: 'medium',
+          message: `Approaching budget limit for category ${category.categoryId}`,
+          data: category
+        });
+      }
+    });
+
+    // High spending alerts
+    const avgSpending = spendingByCategory.reduce((sum, cat) => sum + cat.amount, 0) / spendingByCategory.length;
+    spendingByCategory.forEach(category => {
+      if (category.amount > avgSpending * 2) {
+        alerts.push({
+          type: 'high_spending',
+          severity: 'medium',
+          message: `Unusually high spending in ${category.name}`,
+          data: category
+        });
+      }
+    });
+
+    return alerts;
+  }
+
+  function calculateSpendingAnalytics(transactions: any[], period: string) {
+    const analytics = {
+      totalTransactions: transactions.length,
+      totalIncome: 0,
+      totalExpenses: 0,
+      averageTransaction: 0,
+      largestExpense: 0,
+      largestIncome: 0,
+      trends: []
+    };
+
+    transactions.forEach(transaction => {
+      const amount = parseFloat(transaction.amount);
+      if (amount > 0) {
+        analytics.totalIncome += amount;
+        analytics.largestIncome = Math.max(analytics.largestIncome, amount);
+      } else {
+        const expense = Math.abs(amount);
+        analytics.totalExpenses += expense;
+        analytics.largestExpense = Math.max(analytics.largestExpense, expense);
+      }
+    });
+
+    analytics.averageTransaction = transactions.length > 0 
+      ? (analytics.totalIncome + analytics.totalExpenses) / transactions.length 
+      : 0;
+
+    return analytics;
+  }
+
+  function calculateSpendingTrends(transactions: any[], period: string) {
+    const trends: Record<string, { income: number; expenses: number; transactions: number }> = {};
+    
+    transactions.forEach(transaction => {
+      const date = new Date(transaction.date);
+      const key = period === 'month' 
+        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+        : `${date.getFullYear()}-W${getWeekNumber(date)}`;
+      
+      if (!trends[key]) {
+        trends[key] = { income: 0, expenses: 0, transactions: 0 };
+      }
+      
+      const amount = parseFloat(transaction.amount);
+      if (amount > 0) {
+        trends[key].income += amount;
+      } else {
+        trends[key].expenses += Math.abs(amount);
+      }
+      trends[key].transactions++;
+    });
+
+    return Object.entries(trends)
+      .map(([period, data]) => ({ period, ...data }))
+      .sort((a, b) => a.period.localeCompare(b.period));
+  }
+
+  function calculateCategoryBreakdown(transactions: any[], categories: any[]) {
+    const breakdown: Record<string, { income: number; expenses: number; transactions: number }> = {};
+    
+    transactions.forEach(transaction => {
+      const amount = parseFloat(transaction.amount);
+      const categoryId = transaction.categoryId;
+      
+      if (!breakdown[categoryId]) {
+        breakdown[categoryId] = {
+          income: 0,
+          expenses: 0,
+          transactions: 0
+        };
+      }
+      
+      if (amount > 0) {
+        breakdown[categoryId].income += amount;
+      } else {
+        breakdown[categoryId].expenses += Math.abs(amount);
+      }
+      breakdown[categoryId].transactions++;
+    });
+
+    return categories.map(category => ({
+      id: category.id,
+      name: category.name,
+      icon: category.icon,
+      color: category.color,
+      ...breakdown[category.id] || { income: 0, expenses: 0, transactions: 0 }
+    }));
+  }
+
+  function getWeekNumber(date: Date) {
+    const firstJanuary = new Date(date.getFullYear(), 0, 1);
+    const days = Math.floor((date.getTime() - firstJanuary.getTime()) / (24 * 60 * 60 * 1000));
+    return Math.ceil((days + firstJanuary.getDay() + 1) / 7);
+  }
 
   const httpServer = createServer(app);
   return httpServer;

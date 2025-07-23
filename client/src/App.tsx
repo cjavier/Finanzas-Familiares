@@ -15,6 +15,7 @@ import TransactionsPage from "@/pages/transactions-page";
 import AddTransactionPage from "@/pages/add-transaction-page";
 import CategoriesPage from "@/pages/categories-page";
 import BudgetsPage from "@/pages/budgets-page";
+import QuickBudgetPage from "@/pages/quick-budget-page";
 import RulesPage from "@/pages/rules-page";
 import FilesPage from "@/pages/files-page";
 import NotificationsPage from "@/pages/notifications-page";
@@ -35,6 +36,7 @@ function Router() {
       <ProtectedRoute path="/transactions/add" component={AddTransactionPage} />
       <ProtectedRoute path="/categories" component={CategoriesPage} />
       <ProtectedRoute path="/budgets" component={BudgetsPage} />
+      <ProtectedRoute path="/quick-budget" component={QuickBudgetPage} />
       <ProtectedRoute path="/rules" component={RulesPage} />
       <ProtectedRoute path="/files" component={FilesPage} />
       <ProtectedRoute path="/notifications" component={NotificationsPage} />

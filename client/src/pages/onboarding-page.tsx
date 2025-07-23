@@ -89,17 +89,36 @@ export default function OnboardingPage() {
     setBudgets(prev => ({ ...prev, [categoryName]: amount }));
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (currentStep < 3) {
       setCurrentStep(currentStep + 1);
     } else {
-      // TODO: Save onboarding data
-      console.log('Onboarding data:', {
-        selectedCategories,
-        customCategories,
-        budgets
-      });
-      navigate('/dashboard');
+      try {
+        const response = await fetch('/api/onboarding/complete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            selectedCategories,
+            customCategories,
+            budgets
+          }),
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          console.log('Onboarding completed:', result);
+          navigate('/dashboard');
+        } else {
+          const error = await response.json();
+          console.error('Failed to complete onboarding:', error);
+          // TODO: Show error message to user
+        }
+      } catch (error) {
+        console.error('Error completing onboarding:', error);
+        // TODO: Show error message to user
+      }
     }
   };
 
