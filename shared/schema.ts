@@ -1,40 +1,127 @@
-import { pgTable, text, serial, integer, boolean, decimal, date, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, boolean, decimal, date, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 export const teams = pgTable("teams", {
-  id: serial("id").primaryKey(),
+  id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
-  inviteCode: text("invite_code").notNull().unique(),
+  inviteCode: text("invite_code").unique(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 export const users = pgTable("users", {
-  id: serial("id").primaryKey(),
-  teamId: integer("team_id").references(() => teams.id).notNull(),
+  id: uuid("id").primaryKey().defaultRandom(),
+  teamId: uuid("team_id").references(() => teams.id).notNull(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
-  password: text("password").notNull(),
+  passwordHash: text("password_hash").notNull(),
   role: text("role", { enum: ["admin", "member"] }).default("member").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const categories = pgTable("categories", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  teamId: uuid("team_id").references(() => teams.id).notNull(),
+  name: text("name").notNull(),
+  icon: text("icon"),
+  color: text("color"),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const budgets = pgTable("budgets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  teamId: uuid("team_id").references(() => teams.id).notNull(),
+  categoryId: uuid("category_id").references(() => categories.id).notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  period: text("period", { enum: ["monthly", "weekly", "biweekly", "custom"] }).notNull(),
+  startDate: date("start_date").notNull(),
+  endDate: date("end_date"),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const files = pgTable("files", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  teamId: uuid("team_id").references(() => teams.id).notNull(),
+  userId: uuid("user_id").references(() => users.id).notNull(),
+  fileType: text("file_type", { enum: ["pdf", "excel", "image", "other"] }).notNull(),
+  filePath: text("file_path").notNull(),
+  originalName: text("original_name").notNull(),
+  status: text("status", { enum: ["processing", "processed", "error"] }).default("processing").notNull(),
+  processedAt: timestamp("processed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 export const transactions = pgTable("transactions", {
-  id: serial("id").primaryKey(),
-  teamId: integer("team_id").references(() => teams.id).notNull(),
-  userId: integer("user_id").references(() => users.id).notNull(),
-  category: text("category").notNull(),
+  id: uuid("id").primaryKey().defaultRandom(),
+  teamId: uuid("team_id").references(() => teams.id).notNull(),
+  userId: uuid("user_id").references(() => users.id).notNull(),
+  categoryId: uuid("category_id").references(() => categories.id).notNull(),
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
   description: text("description").notNull(),
   date: date("date").notNull(),
+  source: text("source", { enum: ["manual", "statement", "ticket", "ocr"] }).default("manual").notNull(),
+  status: text("status", { enum: ["active", "deleted", "pending"] }).default("active").notNull(),
+  fileId: uuid("file_id").references(() => files.id),
+  isAiSuggested: boolean("is_ai_suggested").default(false).notNull(),
+  aiConfidence: decimal("ai_confidence", { precision: 5, scale: 4 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const rules = pgTable("rules", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  teamId: uuid("team_id").references(() => teams.id).notNull(),
+  name: text("name").notNull(),
+  matchText: text("match_text").notNull(),
+  field: text("field", { enum: ["description", "amount", "date"] }).notNull(),
+  categoryId: uuid("category_id").references(() => categories.id).notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const notifications = pgTable("notifications", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  teamId: uuid("team_id").references(() => teams.id).notNull(),
+  userId: uuid("user_id").references(() => users.id),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  type: text("type", { enum: ["alert", "info", "reminder"] }).notNull(),
+  isRead: boolean("is_read").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  readAt: timestamp("read_at"),
+  relatedTransactionId: uuid("related_transaction_id").references(() => transactions.id),
+  relatedCategoryId: uuid("related_category_id").references(() => categories.id),
+});
+
+export const transactionAuditLog = pgTable("transaction_audit_log", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  transactionId: uuid("transaction_id").references(() => transactions.id).notNull(),
+  userId: uuid("user_id").references(() => users.id).notNull(),
+  changeType: text("change_type", { enum: ["created", "updated", "deleted", "category_changed"] }).notNull(),
+  oldValue: jsonb("old_value"),
+  newValue: jsonb("new_value"),
+  changedAt: timestamp("changed_at").defaultNow().notNull(),
 });
 
 // Relations
 export const teamsRelations = relations(teams, ({ many }) => ({
   users: many(users),
+  categories: many(categories),
+  budgets: many(budgets),
   transactions: many(transactions),
+  files: many(files),
+  rules: many(rules),
+  notifications: many(notifications),
 }));
 
 export const usersRelations = relations(users, ({ one, many }) => ({
@@ -43,9 +130,46 @@ export const usersRelations = relations(users, ({ one, many }) => ({
     references: [teams.id],
   }),
   transactions: many(transactions),
+  files: many(files),
+  notifications: many(notifications),
+  auditLogs: many(transactionAuditLog),
 }));
 
-export const transactionsRelations = relations(transactions, ({ one }) => ({
+export const categoriesRelations = relations(categories, ({ one, many }) => ({
+  team: one(teams, {
+    fields: [categories.teamId],
+    references: [teams.id],
+  }),
+  transactions: many(transactions),
+  budgets: many(budgets),
+  rules: many(rules),
+  notifications: many(notifications),
+}));
+
+export const budgetsRelations = relations(budgets, ({ one }) => ({
+  team: one(teams, {
+    fields: [budgets.teamId],
+    references: [teams.id],
+  }),
+  category: one(categories, {
+    fields: [budgets.categoryId],
+    references: [categories.id],
+  }),
+}));
+
+export const filesRelations = relations(files, ({ one, many }) => ({
+  team: one(teams, {
+    fields: [files.teamId],
+    references: [teams.id],
+  }),
+  user: one(users, {
+    fields: [files.userId],
+    references: [users.id],
+  }),
+  transactions: many(transactions),
+}));
+
+export const transactionsRelations = relations(transactions, ({ one, many }) => ({
   team: one(teams, {
     fields: [transactions.teamId],
     references: [teams.id],
@@ -54,28 +178,122 @@ export const transactionsRelations = relations(transactions, ({ one }) => ({
     fields: [transactions.userId],
     references: [users.id],
   }),
+  category: one(categories, {
+    fields: [transactions.categoryId],
+    references: [categories.id],
+  }),
+  file: one(files, {
+    fields: [transactions.fileId],
+    references: [files.id],
+  }),
+  auditLogs: many(transactionAuditLog),
+}));
+
+export const rulesRelations = relations(rules, ({ one }) => ({
+  team: one(teams, {
+    fields: [rules.teamId],
+    references: [teams.id],
+  }),
+  category: one(categories, {
+    fields: [rules.categoryId],
+    references: [categories.id],
+  }),
+}));
+
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+  team: one(teams, {
+    fields: [notifications.teamId],
+    references: [teams.id],
+  }),
+  user: one(users, {
+    fields: [notifications.userId],
+    references: [users.id],
+  }),
+  relatedTransaction: one(transactions, {
+    fields: [notifications.relatedTransactionId],
+    references: [transactions.id],
+  }),
+  relatedCategory: one(categories, {
+    fields: [notifications.relatedCategoryId],
+    references: [categories.id],
+  }),
+}));
+
+export const transactionAuditLogRelations = relations(transactionAuditLog, ({ one }) => ({
+  transaction: one(transactions, {
+    fields: [transactionAuditLog.transactionId],
+    references: [transactions.id],
+  }),
+  user: one(users, {
+    fields: [transactionAuditLog.userId],
+    references: [users.id],
+  }),
 }));
 
 // Insert schemas
 export const insertTeamSchema = createInsertSchema(teams).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
 });
 
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
   teamId: true,
+  passwordHash: true,
 }).extend({
   teamName: z.string().optional(),
   inviteCode: z.string().optional(),
+  password: z.string().min(6),
+});
+
+export const insertCategorySchema = createInsertSchema(categories).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  teamId: true,
+});
+
+export const insertBudgetSchema = createInsertSchema(budgets).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  teamId: true,
+});
+
+export const insertFileSchema = createInsertSchema(files).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  teamId: true,
+  userId: true,
 });
 
 export const insertTransactionSchema = createInsertSchema(transactions).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
   teamId: true,
   userId: true,
+});
+
+export const insertRuleSchema = createInsertSchema(rules).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  teamId: true,
+});
+
+export const insertNotificationSchema = createInsertSchema(notifications).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertTransactionAuditLogSchema = createInsertSchema(transactionAuditLog).omit({
+  id: true,
+  changedAt: true,
 });
 
 // Types
@@ -83,5 +301,17 @@ export type Team = typeof teams.$inferSelect;
 export type InsertTeam = z.infer<typeof insertTeamSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
+export type Category = typeof categories.$inferSelect;
+export type InsertCategory = z.infer<typeof insertCategorySchema>;
+export type Budget = typeof budgets.$inferSelect;
+export type InsertBudget = z.infer<typeof insertBudgetSchema>;
+export type File = typeof files.$inferSelect;
+export type InsertFile = z.infer<typeof insertFileSchema>;
 export type Transaction = typeof transactions.$inferSelect;
 export type InsertTransaction = z.infer<typeof insertTransactionSchema>;
+export type Rule = typeof rules.$inferSelect;
+export type InsertRule = z.infer<typeof insertRuleSchema>;
+export type Notification = typeof notifications.$inferSelect;
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type TransactionAuditLog = typeof transactionAuditLog.$inferSelect;
+export type InsertTransactionAuditLog = z.infer<typeof insertTransactionAuditLogSchema>;

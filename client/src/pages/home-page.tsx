@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Wallet, Plus, TrendingUp, TrendingDown, DollarSign, Users, Edit, Trash2, Filter, ChevronLeft, ChevronRight, BarChart3, List, PlusCircle } from "lucide-react";
-import { Transaction, InsertTransaction } from "@shared/schema";
+import { Transaction, InsertTransaction, Category } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
@@ -20,6 +20,7 @@ import { z } from "zod";
 
 const transactionFormSchema = insertTransactionSchema.extend({
   date: z.string().min(1, "Date is required"),
+  categoryId: z.string().min(1, "Category is required"),
 });
 
 type TransactionForm = z.infer<typeof transactionFormSchema>;
@@ -56,6 +57,11 @@ export default function HomePage() {
     enabled: !!user,
   });
 
+  const { data: categories = [] } = useQuery<Category[]>({
+    queryKey: ["/api/categories"],
+    enabled: !!user,
+  });
+
   // Mutations
   const createTransactionMutation = useMutation({
     mutationFn: async (data: InsertTransaction) => {
@@ -74,7 +80,7 @@ export default function HomePage() {
   });
 
   const updateTransactionMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: number; data: Partial<InsertTransaction> }) => {
+    mutationFn: async ({ id, data }: { id: string; data: Partial<InsertTransaction> }) => {
       const res = await apiRequest("PUT", `/api/transactions/${id}`, data);
       return res.json();
     },
@@ -90,7 +96,7 @@ export default function HomePage() {
   });
 
   const deleteTransactionMutation = useMutation({
-    mutationFn: async (id: number) => {
+    mutationFn: async (id: string) => {
       await apiRequest("DELETE", `/api/transactions/${id}`);
     },
     onSuccess: () => {
@@ -107,7 +113,7 @@ export default function HomePage() {
     resolver: zodResolver(transactionFormSchema),
     defaultValues: {
       description: "",
-      category: "",
+      categoryId: "",
       amount: "0",
       date: new Date().toISOString().split('T')[0],
     },
@@ -128,14 +134,14 @@ export default function HomePage() {
     setEditingTransaction(transaction);
     form.reset({
       description: transaction.description,
-      category: transaction.category,
+      categoryId: transaction.categoryId,
       amount: transaction.amount,
       date: transaction.date,
     });
     setIsTransactionModalOpen(true);
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: string) => {
     if (confirm("Are you sure you want to delete this transaction?")) {
       deleteTransactionMutation.mutate(id);
     }
@@ -145,11 +151,16 @@ export default function HomePage() {
     setEditingTransaction(null);
     form.reset({
       description: "",
-      category: "",
+      categoryId: "",
       amount: "0",
       date: new Date().toISOString().split('T')[0],
     });
     setIsTransactionModalOpen(true);
+  };
+
+  // Helper function to get category by ID
+  const getCategoryById = (categoryId: string) => {
+    return categories.find(cat => cat.id === categoryId);
   };
 
   // Calculate summary data
@@ -180,13 +191,14 @@ export default function HomePage() {
   const categoryBreakdown = currentMonthTransactions
     .filter(t => parseFloat(t.amount) < 0)
     .reduce((acc, transaction) => {
-      const category = transaction.category;
+      const category = getCategoryById(transaction.categoryId);
+      const categoryName = category?.name || 'Unknown';
       const amount = Math.abs(parseFloat(transaction.amount));
-      acc[category] = (acc[category] || 0) + amount;
+      acc[categoryName] = (acc[categoryName] || 0) + amount;
       return acc;
     }, {} as Record<string, number>);
 
-  const categories = Object.entries(categoryBreakdown)
+  const categoryEntries = Object.entries(categoryBreakdown)
     .sort(([,a], [,b]) => b - a)
     .slice(0, 5);
 
@@ -195,32 +207,14 @@ export default function HomePage() {
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, 5);
 
-  const getCategoryColor = (category: string) => {
-    const colors: Record<string, string> = {
-      housing: "bg-blue-500",
-      food: "bg-green-500",
-      transportation: "bg-yellow-500",
-      entertainment: "bg-red-500",
-      healthcare: "bg-purple-500",
-      shopping: "bg-pink-500",
-      income: "bg-emerald-500",
-      other: "bg-gray-500",
-    };
-    return colors[category] || "bg-gray-500";
+  const getCategoryColor = (categoryId: string) => {
+    const category = getCategoryById(categoryId);
+    return category?.color || "#6B7280";
   };
 
-  const getCategoryIcon = (category: string) => {
-    const icons: Record<string, string> = {
-      housing: "🏠",
-      food: "🛒",
-      transportation: "⛽",
-      entertainment: "🎬",
-      healthcare: "⚕️",
-      shopping: "🛍️",
-      income: "💰",
-      other: "📦",
-    };
-    return icons[category] || "📦";
+  const getCategoryIcon = (categoryId: string) => {
+    const category = getCategoryById(categoryId);
+    return category?.icon || "📦";
   };
 
   return (
@@ -348,13 +342,13 @@ export default function HomePage() {
                   <CardTitle>Expenses by Category</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {categories.length > 0 ? (
+                  {categoryEntries.length > 0 ? (
                     <div className="space-y-4">
-                      {categories.map(([category, amount]) => (
-                        <div key={category} className="flex items-center justify-between">
+                      {categoryEntries.map(([categoryName, amount]) => (
+                        <div key={categoryName} className="flex items-center justify-between">
                           <div className="flex items-center">
-                            <div className={`w-3 h-3 ${getCategoryColor(category)} rounded-full mr-3`}></div>
-                            <span className="text-gray-700 capitalize">{category}</span>
+                            <div className="w-3 h-3 bg-gray-500 rounded-full mr-3"></div>
+                            <span className="text-gray-700 capitalize">{categoryName}</span>
                           </div>
                           <span className="font-semibold text-gray-800">${amount.toFixed(2)}</span>
                         </div>
@@ -379,22 +373,25 @@ export default function HomePage() {
                 <CardContent>
                   {recentTransactions.length > 0 ? (
                     <div className="space-y-3">
-                      {recentTransactions.map((transaction) => (
-                        <div key={transaction.id} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-b-0">
-                          <div className="flex items-center">
-                            <div className={`w-10 h-10 ${getCategoryColor(transaction.category)} rounded-lg flex items-center justify-center mr-3 text-white text-sm`}>
-                              {getCategoryIcon(transaction.category)}
+                      {recentTransactions.map((transaction) => {
+                        const category = getCategoryById(transaction.categoryId);
+                        return (
+                          <div key={transaction.id} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-b-0">
+                            <div className="flex items-center">
+                              <div className="w-10 h-10 bg-gray-500 rounded-lg flex items-center justify-center mr-3 text-white text-sm">
+                                {getCategoryIcon(transaction.categoryId)}
+                              </div>
+                              <div>
+                                <p className="text-sm font-medium text-gray-800">{transaction.description}</p>
+                                <p className="text-xs text-gray-600">{new Date(transaction.date).toLocaleDateString()}</p>
+                              </div>
                             </div>
-                            <div>
-                              <p className="text-sm font-medium text-gray-800">{transaction.description}</p>
-                              <p className="text-xs text-gray-600">{new Date(transaction.date).toLocaleDateString()}</p>
-                            </div>
+                            <span className={`text-sm font-semibold ${parseFloat(transaction.amount) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {parseFloat(transaction.amount) >= 0 ? '+' : ''}${Math.abs(parseFloat(transaction.amount)).toFixed(2)}
+                            </span>
                           </div>
-                          <span className={`text-sm font-semibold ${parseFloat(transaction.amount) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {parseFloat(transaction.amount) >= 0 ? '+' : ''}${Math.abs(parseFloat(transaction.amount)).toFixed(2)}
-                          </span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <p className="text-gray-500 text-center py-4">No transactions yet</p>
@@ -435,14 +432,11 @@ export default function HomePage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All Categories</SelectItem>
-                        <SelectItem value="income">Income</SelectItem>
-                        <SelectItem value="housing">Housing</SelectItem>
-                        <SelectItem value="food">Food</SelectItem>
-                        <SelectItem value="transportation">Transportation</SelectItem>
-                        <SelectItem value="entertainment">Entertainment</SelectItem>
-                        <SelectItem value="healthcare">Healthcare</SelectItem>
-                        <SelectItem value="shopping">Shopping</SelectItem>
-                        <SelectItem value="other">Other</SelectItem>
+                        {categories.map((category) => (
+                          <SelectItem key={category.id} value={category.id}>
+                            {category.name}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -496,30 +490,33 @@ export default function HomePage() {
                           </TableCell>
                         </TableRow>
                       ) : (
-                        transactions.map((transaction) => (
-                          <TableRow key={transaction.id}>
-                            <TableCell>{new Date(transaction.date).toLocaleDateString()}</TableCell>
-                            <TableCell>{transaction.description}</TableCell>
-                            <TableCell>
-                              <Badge variant="secondary" className="capitalize">
-                                {transaction.category}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className={`text-right font-medium ${parseFloat(transaction.amount) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              {parseFloat(transaction.amount) >= 0 ? '+' : ''}${Math.abs(parseFloat(transaction.amount)).toFixed(2)}
-                            </TableCell>
-                            <TableCell className="text-center">
-                              <div className="flex justify-center space-x-2">
-                                <Button variant="ghost" size="sm" onClick={() => handleEdit(transaction)}>
-                                  <Edit className="h-4 w-4" />
-                                </Button>
-                                <Button variant="ghost" size="sm" onClick={() => handleDelete(transaction.id)}>
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))
+                        transactions.map((transaction) => {
+                          const category = getCategoryById(transaction.categoryId);
+                          return (
+                            <TableRow key={transaction.id}>
+                              <TableCell>{new Date(transaction.date).toLocaleDateString()}</TableCell>
+                              <TableCell>{transaction.description}</TableCell>
+                              <TableCell>
+                                <Badge variant="secondary" className="capitalize">
+                                  {category?.name || 'Unknown'}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className={`text-right font-medium ${parseFloat(transaction.amount) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {parseFloat(transaction.amount) >= 0 ? '+' : ''}${Math.abs(parseFloat(transaction.amount)).toFixed(2)}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <div className="flex justify-center space-x-2">
+                                  <Button variant="ghost" size="sm" onClick={() => handleEdit(transaction)}>
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
+                                  <Button variant="ghost" size="sm" onClick={() => handleDelete(transaction.id)}>
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
                       )}
                     </TableBody>
                   </Table>
@@ -553,25 +550,22 @@ export default function HomePage() {
               </div>
 
               <div>
-                <Label htmlFor="category">Category</Label>
-                <Select value={form.watch("category")} onValueChange={(value) => form.setValue("category", value)}>
+                <Label htmlFor="categoryId">Category</Label>
+                <Select value={form.watch("categoryId")} onValueChange={(value) => form.setValue("categoryId", value)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select category" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="income">Income</SelectItem>
-                    <SelectItem value="housing">Housing</SelectItem>
-                    <SelectItem value="food">Food</SelectItem>
-                    <SelectItem value="transportation">Transportation</SelectItem>
-                    <SelectItem value="entertainment">Entertainment</SelectItem>
-                    <SelectItem value="healthcare">Healthcare</SelectItem>
-                    <SelectItem value="shopping">Shopping</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
+                    {categories.map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
-                {form.formState.errors.category && (
+                {form.formState.errors.categoryId && (
                   <p className="text-sm text-red-500 mt-1">
-                    {form.formState.errors.category.message}
+                    {form.formState.errors.categoryId.message}
                   </p>
                 )}
               </div>
