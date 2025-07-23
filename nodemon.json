@@ -1,0 +1,15 @@
+{
+  "watch": ["server/", "shared/", ".env"],
+  "ext": "ts,js,json",
+  "ignore": [
+    "dist/",
+    "client/",
+    "node_modules/",
+    "*.test.ts",
+    "*.test.js",
+    ".git"
+  ],
+  "env": {
+    "NODE_ENV": "development"
+  }
+} 
