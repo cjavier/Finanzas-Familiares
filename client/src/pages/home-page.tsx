@@ -40,6 +40,19 @@ export default function HomePage() {
   // Queries
   const { data: transactions = [], isLoading: isLoadingTransactions } = useQuery<Transaction[]>({
     queryKey: ["/api/transactions", filters],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (filters.category) params.append('category', filters.category);
+      if (filters.fromDate) params.append('fromDate', filters.fromDate);
+      if (filters.toDate) params.append('toDate', filters.toDate);
+      
+      const url = `/api/transactions${params.toString() ? `?${params.toString()}` : ''}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error('Failed to fetch transactions');
+      }
+      return response.json();
+    },
     enabled: !!user,
   });
 
