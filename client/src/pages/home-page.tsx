@@ -416,12 +416,12 @@ export default function HomePage() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
                     <Label>Category</Label>
-                    <Select value={filters.category} onValueChange={(value) => setFilters({...filters, category: value})}>
+                    <Select value={filters.category || "all"} onValueChange={(value) => setFilters({...filters, category: value === "all" ? "" : value})}>
                       <SelectTrigger>
                         <SelectValue placeholder="All Categories" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">All Categories</SelectItem>
+                        <SelectItem value="all">All Categories</SelectItem>
                         <SelectItem value="income">Income</SelectItem>
                         <SelectItem value="housing">Housing</SelectItem>
                         <SelectItem value="food">Food</SelectItem>

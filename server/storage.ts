@@ -19,11 +19,11 @@ export interface IStorage {
   updateTransaction(id: number, transaction: Partial<InsertTransaction>): Promise<Transaction | undefined>;
   deleteTransaction(id: number, teamId: number): Promise<boolean>;
   getTransaction(id: number, teamId: number): Promise<Transaction | undefined>;
-  sessionStore: session.SessionStore;
+  sessionStore: session.Store;
 }
 
 export class DatabaseStorage implements IStorage {
-  sessionStore: session.SessionStore;
+  sessionStore: session.Store;
 
   constructor() {
     this.sessionStore = new PostgresSessionStore({ 
@@ -138,7 +138,7 @@ export class DatabaseStorage implements IStorage {
       .delete(transactions)
       .where(and(eq(transactions.id, id), eq(transactions.teamId, teamId)));
     
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async getTransaction(id: number, teamId: number): Promise<Transaction | undefined> {
