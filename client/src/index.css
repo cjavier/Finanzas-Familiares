@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: hsl(0, 0%, 100%);
+  --foreground: hsl(20, 14.3%, 4.1%);
+  --muted: hsl(60, 4.8%, 95.9%);
+  --muted-foreground: hsl(25, 5.3%, 44.7%);
+  --popover: hsl(0, 0%, 100%);
+  --popover-foreground: hsl(20, 14.3%, 4.1%);
+  --card: hsl(0, 0%, 100%);
+  --card-foreground: hsl(20, 14.3%, 4.1%);
+  --border: hsl(20, 5.9%, 90%);
+  --input: hsl(20, 5.9%, 90%);
+  --primary: hsl(207, 90%, 54%);
+  --primary-foreground: hsl(211, 100%, 99%);
+  --secondary: hsl(60, 4.8%, 95.9%);
+  --secondary-foreground: hsl(24, 9.8%, 10%);
+  --accent: hsl(60, 4.8%, 95.9%);
+  --accent-foreground: hsl(24, 9.8%, 10%);
+  --destructive: hsl(0, 84.2%, 60.2%);
+  --destructive-foreground: hsl(60, 9.1%, 97.8%);
+  --ring: hsl(20, 14.3%, 4.1%);
+  --radius: 0.5rem;
+
+  /* Chakra UI inspired colors */
+  --chakra-blue-50: hsl(206, 100%, 97%);
+  --chakra-blue-500: hsl(207, 90%, 54%);
+  --chakra-blue-600: hsl(208, 88%, 50%);
+  --chakra-blue-700: hsl(211, 89%, 46%);
+  
+  --chakra-green-50: hsl(120, 100%, 97%);
+  --chakra-green-500: hsl(142, 51%, 45%);
+  --chakra-green-600: hsl(142, 69%, 36%);
+  
+  --chakra-red-50: hsl(0, 86%, 97%);
+  --chakra-red-500: hsl(0, 73%, 57%);
+  --chakra-red-600: hsl(0, 70%, 51%);
+  
+  --chakra-yellow-50: hsl(48, 100%, 96%);
+  --chakra-yellow-500: hsl(45, 85%, 47%);
+  --chakra-yellow-600: hsl(43, 85%, 38%);
+  
+  --chakra-gray-50: hsl(210, 36%, 98%);
+  --chakra-gray-100: hsl(212, 33%, 97%);
+  --chakra-gray-200: hsl(213, 27%, 92%);
+  --chakra-gray-300: hsl(213, 20%, 82%);
+  --chakra-gray-400: hsl(215, 16%, 65%);
+  --chakra-gray-500: hsl(215, 19%, 35%);
+  --chakra-gray-600: hsl(215, 28%, 17%);
+  --chakra-gray-700: hsl(217, 33%, 17%);
+  --chakra-gray-800: hsl(220, 39%, 11%);
+  --chakra-gray-900: hsl(220, 62%, 8%);
+}
+
+.dark {
+  --background: hsl(240, 10%, 3.9%);
+  --foreground: hsl(0, 0%, 98%);
+  --muted: hsl(240, 3.7%, 15.9%);
+  --muted-foreground: hsl(240, 5%, 64.9%);
+  --popover: hsl(240, 10%, 3.9%);
+  --popover-foreground: hsl(0, 0%, 98%);
+  --card: hsl(240, 10%, 3.9%);
+  --card-foreground: hsl(0, 0%, 98%);
+  --border: hsl(240, 3.7%, 15.9%);
+  --input: hsl(240, 3.7%, 15.9%);
+  --primary: hsl(207, 90%, 54%);
+  --primary-foreground: hsl(211, 100%, 99%);
+  --secondary: hsl(240, 3.7%, 15.9%);
+  --secondary-foreground: hsl(0, 0%, 98%);
+  --accent: hsl(240, 3.7%, 15.9%);
+  --accent-foreground: hsl(0, 0%, 98%);
+  --destructive: hsl(0, 62.8%, 30.6%);
+  --destructive-foreground: hsl(0, 0%, 98%);
+  --ring: hsl(240, 4.9%, 83.9%);
+  --radius: 0.5rem;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+  }
+}
+
+/* Custom styles for better visual hierarchy */
+.card-shadow {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
+}
+
+.card-shadow:hover {
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Gradient backgrounds */
+.gradient-blue {
+  background: linear-gradient(135deg, var(--chakra-blue-50) 0%, var(--chakra-gray-50) 100%);
+}
+
+/* Category color classes */
+.bg-category-housing { background-color: var(--chakra-blue-500); }
+.bg-category-food { background-color: var(--chakra-green-500); }
+.bg-category-transportation { background-color: var(--chakra-yellow-500); }
+.bg-category-entertainment { background-color: var(--chakra-red-500); }
+.bg-category-healthcare { background-color: hsl(271, 81%, 56%); }
+.bg-category-shopping { background-color: hsl(328, 85%, 70%); }
+.bg-category-income { background-color: hsl(142, 51%, 45%); }
+.bg-category-other { background-color: var(--chakra-gray-500); }
