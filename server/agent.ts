@@ -1,17 +1,18 @@
 import { Agent, run, tool } from '@openai/agents';
 import { z } from 'zod';
-import type { User, Team, Category, Transaction, Conversation, InsertConversation } from '../shared/schema';
+import type { User, Team, Category, Transaction, Budget, Rule, InsertCategory, InsertBudget, InsertRule } from '../shared/schema';
+import type { IStorage } from './storage';
 
 interface AgentContext {
   user: User;
   team: Team;
-  categories: Category[];
-  recentTransactions: Transaction[];
+  storage: IStorage;
 }
 
 class FinanceAgent {
   private agent: Agent;
   private context: AgentContext | null = null;
+  private currentToolsUsed: Set<string> = new Set();
 
   constructor() {
     // Check if OpenAI API key is configured
@@ -19,136 +20,431 @@ class FinanceAgent {
       throw new Error('OPENAI_API_KEY environment variable is required for AI agent functionality');
     }
 
-    // Define function tools
-    const analyzeFileTool = tool({
-      name: 'analizar_archivo_financiero',
-      description: 'Analiza documentos financieros subidos (PDF, CSV, Excel) para extraer datos de transacciones y sugerir categorías',
+    // Define comprehensive financial management tools
+    const getTransactionsTool = tool({
+      name: 'obtener_transacciones',
+      description: 'Obtiene transacciones del equipo con filtros opcionales por fechas, categoría, búsqueda de texto',
       parameters: z.object({
-        contenidoArchivo: z.string().describe('El contenido del archivo financiero a analizar'),
-        nombreArchivo: z.string().describe('El nombre del archivo que se está analizando')
+        fechaInicio: z.string().nullable().optional().describe('Fecha de inicio en formato YYYY-MM-DD'),
+        fechaFin: z.string().nullable().optional().describe('Fecha de fin en formato YYYY-MM-DD'),
+        categoriaId: z.string().nullable().optional().describe('ID de categoría para filtrar'),
+        busqueda: z.string().nullable().optional().describe('Texto a buscar en descripción de transacciones'),
+        limite: z.number().nullable().optional().describe('Número máximo de transacciones a obtener (default: 50)')
       }),
-      execute: async ({ contenidoArchivo, nombreArchivo }) => {
+      execute: async ({ fechaInicio, fechaFin, categoriaId, busqueda, limite }) => {
         if (!this.context) {
-          return 'No hay contexto disponible para el análisis del archivo';
+          return 'No hay contexto disponible';
         }
         
-        const categoriasContexto = this.context.categories.map(cat => `${cat.name} (${cat.id})`).join(', ');
+        this.currentToolsUsed.add('obtener_transacciones');
         
-        return `Análisis de ${nombreArchivo}:
-Categorías disponibles: ${categoriasContexto}
-Contenido del archivo: ${contenidoArchivo.substring(0, 1000)}...
-
-Por favor extrae las transacciones y sugiere las categorías apropiadas de las opciones disponibles.`;
+        try {
+          const filters = {
+            fromDate: fechaInicio ?? undefined,
+            toDate: fechaFin ?? undefined,
+            categoryId: categoriaId ?? undefined,
+            search: busqueda ?? undefined,
+            limit: limite ?? 50
+          };
+          
+          const transactions = await this.context.storage.getTransactions(this.context.team.id, filters);
+          const categories = await this.context.storage.getCategories(this.context.team.id);
+          
+          const transactionsWithCategories = transactions.map(t => {
+            const category = categories.find(c => c.id === t.categoryId);
+            return {
+              id: t.id,
+              fecha: t.date,
+              descripcion: t.description,
+              monto: t.amount,
+              categoria: category?.name || 'Sin categoría',
+              estado: t.status
+            };
+          });
+          
+          return JSON.stringify({
+            total: transactionsWithCategories.length,
+            transacciones: transactionsWithCategories,
+            resumen: {
+              montoTotal: transactionsWithCategories.reduce((sum, t) => sum + parseFloat(t.monto), 0),
+              filtrosAplicados: { fechaInicio, fechaFin, categoriaId, busqueda }
+            }
+          }, null, 2);
+        } catch (error) {
+          return `Error obteniendo transacciones: ${error}`;
+        }
       }
     });
 
-    const suggestCategoriesTool = tool({
-      name: 'sugerir_categorias_transacciones',
-      description: 'Analiza transacciones y sugiere mejores asignaciones de categorías basadas en patrones de gasto',
-      parameters: z.object({
-        idsTransacciones: z.array(z.string()).describe('Array de IDs de transacciones a analizar')
-      }),
-      execute: async ({ idsTransacciones }) => {
+    const getCategoriesTool = tool({
+      name: 'obtener_categorias',
+      description: 'Obtiene todas las categorías disponibles para el equipo',
+      parameters: z.object({}),
+      execute: async () => {
         if (!this.context) {
-          return 'No hay contexto disponible para sugerencias de categorías';
+          return 'No hay contexto disponible';
         }
         
-        const categoriasContexto = this.context.categories.map(cat => `${cat.name} - ${cat.id}`).join(', ');
-        const transacciones = this.context.recentTransactions.filter(t => idsTransacciones.includes(t.id));
+        this.currentToolsUsed.add('obtener_categorias');
         
-        return `Analizando ${transacciones.length} transacciones para mejor categorización:
-Categorías disponibles: ${categoriasContexto}
-Transacciones a analizar: ${transacciones.map(t => `${t.description} ($${t.amount})`).join(', ')}`;
+        try {
+          const categories = await this.context.storage.getCategories(this.context.team.id);
+          return JSON.stringify({
+            total: categories.length,
+            categorias: categories.map(c => ({
+              id: c.id,
+              nombre: c.name,
+              icono: c.icon,
+              color: c.color
+            }))
+          }, null, 2);
+        } catch (error) {
+          return `Error obteniendo categorías: ${error}`;
+        }
       }
     });
 
-    const createRulesTool = tool({
-      name: 'crear_reglas_categorizacion',
-      description: 'Crea reglas automatizadas para categorizar transacciones futuras basadas en patrones',
+    const manageCategoryTool = tool({
+      name: 'gestionar_categoria',
+      description: 'Crea o edita una categoría. Si se proporciona ID, edita la categoría existente; si no, crea una nueva',
       parameters: z.object({
-        tipoRegla: z.enum(['descripcion', 'monto']).describe('Tipo de regla a crear'),
-        patron: z.string().describe('Patrón a coincidir para categorización automática')
+        id: z.string().nullable().optional().describe('ID de la categoría a editar (opcional para crear nueva)'),
+        nombre: z.string().describe('Nombre de la categoría'),
+        icono: z.string().nullable().optional().describe('Icono de la categoría'),
+        color: z.string().nullable().optional().describe('Color de la categoría')
       }),
-      execute: async ({ tipoRegla, patron }) => {
+      execute: async ({ id, nombre, icono, color }) => {
         if (!this.context) {
-          return 'No hay contexto disponible para la creación de reglas';
+          return 'No hay contexto disponible';
         }
         
-        const categoriasContexto = this.context.categories.map(cat => `${cat.name} - ${cat.id}`).join(', ');
+        this.currentToolsUsed.add('gestionar_categoria');
         
-        return `Creando regla de categorización basada en ${tipoRegla}:
-Patrón: ${patron}
-Categorías disponibles: ${categoriasContexto}
-Esta regla categorizará automáticamente las transacciones futuras que coincidan con el patrón especificado.`;
+        try {
+          if (id) {
+            // Editar categoría existente
+            const updated = await this.context.storage.updateCategory(id, {
+              name: nombre,
+              icon: icono,
+              color: color
+            });
+            return updated ? `Categoría "${nombre}" actualizada exitosamente` : 'Error actualizando categoría';
+          } else {
+            // Crear nueva categoría
+            const newCategory = await this.context.storage.createCategory({
+              name: nombre,
+              icon: icono || '📝',
+              color: color || '#6366f1',
+              teamId: this.context.team.id
+            });
+            return `Nueva categoría "${nombre}" creada exitosamente con ID: ${newCategory.id}`;
+          }
+        } catch (error) {
+          return `Error gestionando categoría: ${error}`;
+        }
       }
     });
 
-    const getFinancialInsightsTool = tool({
-      name: 'obtener_insights_financieros',
-      description: 'Proporciona análisis e insights sobre los patrones de gasto y finanzas del usuario',
-      parameters: z.object({
-        tipoAnalisis: z.enum(['gastos', 'presupuesto', 'tendencias', 'categorias']).describe('Tipo de análisis a realizar')
-      }),
-      execute: async ({ tipoAnalisis }) => {
+    const getRulesTool = tool({
+      name: 'obtener_reglas',
+      description: 'Obtiene todas las reglas de categorización automática del equipo',
+      parameters: z.object({}),
+      execute: async () => {
         if (!this.context) {
-          return 'No hay contexto disponible para el análisis financiero';
+          return 'No hay contexto disponible';
         }
         
-        const totalGastos = this.context.recentTransactions.reduce((sum, t) => sum + parseFloat(t.amount), 0);
-        const categorias = this.context.categories.map(c => c.name).join(', ');
+        this.currentToolsUsed.add('obtener_reglas');
         
-        return `Análisis financiero - ${tipoAnalisis}:
-Total de transacciones recientes: ${this.context.recentTransactions.length}
-Total de gastos recientes: $${totalGastos.toFixed(2)}
-Categorías disponibles: ${categorias}
-Equipo: ${this.context.team.name}
-Usuario: ${this.context.user.name}`;
+        try {
+          const rules = await this.context.storage.getRules(this.context.team.id);
+          const categories = await this.context.storage.getCategories(this.context.team.id);
+          
+          const rulesWithCategories = rules.map(r => {
+            const category = categories.find(c => c.id === r.categoryId);
+            return {
+              id: r.id,
+              nombre: r.name,
+              campo: r.field,
+              textoCoincidencia: r.matchText,
+              categoria: category?.name || 'Categoría no encontrada',
+              categoriaId: r.categoryId,
+              activa: r.isActive
+            };
+          });
+          
+          return JSON.stringify({
+            total: rulesWithCategories.length,
+            reglas: rulesWithCategories
+          }, null, 2);
+        } catch (error) {
+          return `Error obteniendo reglas: ${error}`;
+        }
       }
     });
+
+    const manageRuleTool = tool({
+      name: 'gestionar_regla',
+      description: 'Crea o edita una regla de categorización automática. Si se proporciona ID, edita la regla existente; si no, crea una nueva',
+      parameters: z.object({
+        id: z.string().nullable().optional().describe('ID de la regla a editar (opcional para crear nueva)'),
+        nombre: z.string().describe('Nombre descriptivo de la regla'),
+        campo: z.enum(['description', 'amount']).describe('Campo a evaluar: description o amount'),
+        textoCoincidencia: z.string().describe('Texto o patrón que debe coincidir'),
+        categoriaId: z.string().describe('ID de la categoría a asignar cuando coincida'),
+        activa: z.boolean().nullable().optional().describe('Si la regla está activa (default: true)')
+      }),
+      execute: async ({ id, nombre, campo, textoCoincidencia, categoriaId, activa }) => {
+        if (!this.context) {
+          return 'No hay contexto disponible';
+        }
+        
+        this.currentToolsUsed.add('gestionar_regla');
+        
+        try {
+          // Verificar que la categoría existe
+          const category = await this.context.storage.getCategory(categoriaId, this.context.team.id);
+          if (!category) {
+            return `Error: La categoría con ID ${categoriaId} no existe`;
+          }
+          
+          if (id) {
+            // Editar regla existente
+            const updated = await this.context.storage.updateRule(id, {
+              name: nombre,
+              field: campo,
+              matchText: textoCoincidencia,
+              categoryId: categoriaId,
+              isActive: activa ?? true
+            });
+            return updated ? `Regla "${nombre}" actualizada exitosamente` : 'Error actualizando regla';
+          } else {
+            // Crear nueva regla
+            const newRule = await this.context.storage.createRule({
+              name: nombre,
+              field: campo,
+              matchText: textoCoincidencia,
+              categoryId: categoriaId,
+              isActive: activa ?? true,
+              teamId: this.context.team.id
+            });
+            return `Nueva regla "${nombre}" creada exitosamente con ID: ${newRule.id}`;
+          }
+        } catch (error) {
+          return `Error gestionando regla: ${error}`;
+        }
+      }
+    });
+
+    const getBudgetsTool = tool({
+      name: 'obtener_presupuestos',
+      description: 'Obtiene todos los presupuestos del equipo con información de gastos actuales',
+      parameters: z.object({}),
+      execute: async () => {
+        if (!this.context) {
+          return 'No hay contexto disponible';
+        }
+        
+        this.currentToolsUsed.add('obtener_presupuestos');
+        
+        try {
+          const budgets = await this.context.storage.getBudgets(this.context.team.id);
+          const categories = await this.context.storage.getCategories(this.context.team.id);
+          
+          // Calculate spent amounts for each budget
+          const budgetsWithDetails = await Promise.all(budgets.map(async (b) => {
+            const category = categories.find(c => c.id === b.categoryId);
+            
+            // Get transactions for this category within the budget period
+            const transactions = await this.context!.storage.getTransactions(this.context!.team.id, {
+              categoryId: b.categoryId,
+              fromDate: b.startDate,
+              toDate: b.endDate || undefined
+            });
+            
+            const montoGastado = transactions.reduce((sum, t) => sum + parseFloat(t.amount), 0);
+            const budgetAmount = parseFloat(b.amount);
+            
+            return {
+              id: b.id,
+              categoria: category?.name || 'Categoría no encontrada',
+              categoriaId: b.categoryId,
+              monto: budgetAmount,
+              periodo: b.period,
+              fechaInicio: b.startDate,
+              fechaFin: b.endDate,
+              montoGastado,
+              porcentajeUsado: budgetAmount > 0 ? (montoGastado / budgetAmount) * 100 : 0
+            };
+          }));
+          
+          return JSON.stringify({
+            total: budgetsWithDetails.length,
+            presupuestos: budgetsWithDetails,
+            resumen: {
+              presupuestoTotal: budgetsWithDetails.reduce((sum, b) => sum + b.monto, 0),
+              gastadoTotal: budgetsWithDetails.reduce((sum, b) => sum + b.montoGastado, 0)
+            }
+          }, null, 2);
+        } catch (error) {
+          return `Error obteniendo presupuestos: ${error}`;
+        }
+      }
+    });
+
+    const manageBudgetTool = tool({
+      name: 'gestionar_presupuesto',
+      description: 'Crea o edita un presupuesto. Si se proporciona ID, edita el presupuesto existente; si no, crea uno nuevo',
+      parameters: z.object({
+        id: z.string().nullable().optional().describe('ID del presupuesto a editar (opcional para crear nuevo)'),
+        categoriaId: z.string().describe('ID de la categoría para el presupuesto'),
+        monto: z.number().describe('Monto del presupuesto'),
+        periodo: z.enum(['monthly', 'weekly', 'biweekly', 'custom']).describe('Período del presupuesto'),
+        fechaInicio: z.string().describe('Fecha de inicio en formato YYYY-MM-DD'),
+        fechaFin: z.string().describe('Fecha de fin en formato YYYY-MM-DD')
+      }),
+      execute: async ({ id, categoriaId, monto, periodo, fechaInicio, fechaFin }) => {
+        if (!this.context) {
+          return 'No hay contexto disponible';
+        }
+        
+        this.currentToolsUsed.add('gestionar_presupuesto');
+        
+        try {
+          // Verificar que la categoría existe
+          const category = await this.context.storage.getCategory(categoriaId, this.context.team.id);
+          if (!category) {
+            return `Error: La categoría con ID ${categoriaId} no existe`;
+          }
+          
+          if (id) {
+            // Editar presupuesto existente
+            const updated = await this.context.storage.updateBudget(id, {
+              categoryId: categoriaId,
+              amount: monto.toString(),
+              period: periodo,
+              startDate: fechaInicio,
+              endDate: fechaFin
+            });
+            return updated ? `Presupuesto para "${category.name}" actualizado exitosamente` : 'Error actualizando presupuesto';
+          } else {
+            // Crear nuevo presupuesto
+            const newBudget = await this.context.storage.createBudget({
+              categoryId: categoriaId,
+              amount: monto.toString(),
+              period: periodo,
+              startDate: fechaInicio,
+              endDate: fechaFin,
+              teamId: this.context.team.id
+            });
+            return `Nuevo presupuesto para "${category.name}" creado exitosamente con ID: ${newBudget.id}`;
+          }
+        } catch (error) {
+          return `Error gestionando presupuesto: ${error}`;
+        }
+      }
+    });
+
 
     this.agent = new Agent({
       name: 'Asistente Financiero',
-      instructions: `Eres un asistente financiero útil para una aplicación de seguimiento de finanzas familiares. 
+      instructions: `Eres un asistente financiero experto para una aplicación de seguimiento de finanzas familiares.
       
-      Tienes acceso a los datos financieros del usuario incluyendo:
-      - Categorías para organizar gastos
-      - Historial de transacciones y gastos
-      - Información de presupuestos
-      - Miembros del equipo y configuraciones
+      IMPORTANTE: Tienes acceso al historial completo de la conversación cuando se proporciona. Utiliza este contexto para:
+      - Recordar información previa discutida
+      - Mantener continuidad en las recomendaciones
+      - Hacer referencia a datos previamente consultados
+      - Evitar repetir consultas innecesarias de herramientas
       
-      Tu rol es:
-      1. Ayudar a los usuarios a entender sus patrones de gasto
-      2. Proporcionar insights sobre presupuestos y metas financieras
-      3. Sugerir categorizaciones para transacciones
-      4. Ayudar a analizar documentos financieros subidos
-      5. Crear reglas automatizadas para categorización de transacciones
-      6. Responder preguntas sobre sus datos financieros
+      CAPACIDADES PRINCIPALES:
+      Puedes consultar y gestionar todos los aspectos financieros del equipo familiar:
       
-      Tienes acceso a herramientas especializadas:
-      - analizar_archivo_financiero: Úsala cuando los usuarios suban documentos financieros
-      - sugerir_categorias_transacciones: Úsala cuando los usuarios quieran mejores sugerencias de categorías
-      - crear_reglas_categorizacion: Úsala cuando los usuarios quieran automatizar la categorización
-      - obtener_insights_financieros: Úsala para proporcionar análisis financieros detallados
+      📊 TRANSACCIONES:
+      - Consultar transacciones con filtros por fecha, categoría, búsqueda de texto
+      - Analizar patrones de gasto y tendencias
+      - Proporcionar insights sobre gastos específicos
       
-      Siempre sé útil, preciso y enfocado en consejos financieros prácticos. 
-      Usa el contexto proporcionado sobre su situación financiera actual para dar respuestas personalizadas.
-      Mantén las respuestas concisas pero informativas.
-      Responde siempre en español.`,
-      tools: [analyzeFileTool, suggestCategoriesTool, createRulesTool, getFinancialInsightsTool]
+      🏷️ CATEGORÍAS:
+      - Ver todas las categorías disponibles
+      - Crear nuevas categorías con iconos y colores personalizados
+      - Editar categorías existentes
+      
+      ⚙️ REGLAS DE CATEGORIZACIÓN:
+      - Consultar reglas automatizadas existentes
+      - Crear nuevas reglas para categorización automática
+      - Editar reglas existentes para mejorar la precisión
+      
+      💰 PRESUPUESTOS:
+      - Ver todos los presupuestos con estado actual de gastos
+      - Crear nuevos presupuestos para categorías específicas
+      - Editar presupuestos existentes
+      - Analizar cumplimiento de presupuestos
+      
+      HERRAMIENTAS DISPONIBLES:
+      - obtener_transacciones: Consulta transacciones con filtros avanzados
+      - obtener_categorias: Ve todas las categorías del equipo
+      - gestionar_categoria: Crea o edita categorías
+      - obtener_reglas: Ve reglas de categorización automática
+      - gestionar_regla: Crea o edita reglas de categorización
+      - obtener_presupuestos: Ve presupuestos con estado actual
+      - gestionar_presupuesto: Crea o edita presupuestos
+      
+      INSTRUCCIONES DE USO:
+      1. Usa las herramientas proactivamente para responder preguntas específicas
+      2. Al gestionar datos, siempre confirma los cambios realizados
+      3. Proporciona análisis útiles basados en los datos reales del usuario
+      4. Sugiere mejoras y optimizaciones financieras
+      5. Mantén respuestas concisas pero informativas
+      6. Siempre responde en español
+      
+      Cuando el usuario haga preguntas sobre transacciones, categorías, reglas o presupuestos, usa las herramientas correspondientes para obtener información actualizada y precisa.`,
+      tools: [
+        getTransactionsTool,
+        getCategoriesTool,
+        manageCategoryTool,
+        getRulesTool,
+        manageRuleTool,
+        getBudgetsTool,
+        manageBudgetTool
+      ]
     });
   }
 
-  async chat(message: string, context: AgentContext): Promise<string> {
+  async chat(message: string, context: AgentContext, conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = []): Promise<{ response: string; toolsUsed: string[] }> {
     try {
       this.context = context; // Set context for tools to use
-      const contextPrompt = this.buildContextPrompt(context);
-      const fullMessage = `${contextPrompt}\n\nMensaje del usuario: ${message}`;
+      this.currentToolsUsed.clear(); // Reset tools tracking
       
-      const result = await run(this.agent, fullMessage);
-      return result.finalOutput || 'Lo siento, pero no pude procesar tu solicitud en este momento.';
+      const contextPrompt = this.buildContextPrompt(context);
+      
+      // Build the conversation context for the agent
+      // For OpenAI Agents, we need to pass the conversation as a single string with context
+      let fullConversation = contextPrompt + '\n\n';
+      
+      // Add conversation history
+      if (conversationHistory.length > 0) {
+        fullConversation += 'HISTORIAL DE CONVERSACIÓN:\n';
+        conversationHistory.forEach(msg => {
+          const roleLabel = msg.role === 'user' ? 'Usuario' : 'Asistente';
+          fullConversation += `${roleLabel}: ${msg.content}\n\n`;
+        });
+        fullConversation += 'MENSAJE ACTUAL:\n';
+      }
+      
+      fullConversation += `Usuario: ${message}`;
+      
+      const result = await run(this.agent, fullConversation);
+      
+      return {
+        response: result.finalOutput || 'Lo siento, pero no pude procesar tu solicitud en este momento.',
+        toolsUsed: Array.from(this.currentToolsUsed)
+      };
     } catch (error) {
       console.error('Error del Agente AI:', error);
-      return 'Lo siento, pero encontré un error al procesar tu solicitud. Por favor, inténtalo de nuevo.';
+      return {
+        response: 'Lo siento, pero encontré un error al procesar tu solicitud. Por favor, inténtalo de nuevo.',
+        toolsUsed: Array.from(this.currentToolsUsed)
+      };
     }
   }
 
@@ -164,7 +460,9 @@ Usuario: ${this.context.user.name}`;
     insights: string;
   }> {
     try {
-      const categoriesContext = context.categories.map(cat => `${cat.name} (${cat.id})`).join(', ');
+      this.context = context;
+      const categories = await context.storage.getCategories(context.team.id);
+      const categoriesContext = categories.map(cat => `${cat.name} (${cat.id})`).join(', ');
       
       const analysisPrompt = `Analiza este contenido de archivo financiero y extrae datos de transacciones:
 
@@ -302,19 +600,21 @@ Enfócate en patrones claros como nombres de comercios, tipos de transacciones, 
   }
 
   private buildContextPrompt(context: AgentContext): string {
-    const totalTransactions = context.recentTransactions.length;
-    const totalSpent = context.recentTransactions.reduce((sum, t) => sum + parseFloat(t.amount), 0);
-    const categoryNames = context.categories.map(c => c.name).join(', ');
+    return `CONTEXTO DEL EQUIPO FINANCIERO:
     
-    return `Contexto sobre la situación financiera del usuario:
-    
-Equipo: ${context.team.name}
-Usuario: ${context.user.name}
-Categorías Disponibles: ${categoryNames}
-Transacciones Recientes: ${totalTransactions} transacciones
-Total de Gastos Recientes: $${totalSpent.toFixed(2)}
+🏥 Equipo: ${context.team.name}
+👤 Usuario Actual: ${context.user.name}
+🏢 ID del Equipo: ${context.team.id}
+👑 Rol del Usuario: ${context.user.role}
 
-Este contexto debe informar tus respuestas sobre su situación financiera.`;
+📋 INSTRUCCIONES IMPORTANTES:
+- Tienes acceso completo a todas las herramientas de gestión financiera
+- Usa las herramientas proactivamente para obtener información actualizada
+- Todos los datos están limitados al contexto de este equipo familiar
+- Proporciona análisis prácticos y accionables
+- Confirma siempre los cambios realizados
+
+¡Usa las herramientas disponibles para responder con datos precisos y actualizados!`;
   }
 }
 

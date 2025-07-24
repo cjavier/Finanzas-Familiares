@@ -44,6 +44,7 @@ interface ChatMessage {
   type: 'user' | 'bot';
   message: string;
   timestamp: Date;
+  toolsUsed?: string[];
 }
 
 interface Conversation {
@@ -52,7 +53,24 @@ interface Conversation {
   message: string;
   response: string;
   createdAt: string;
+  context?: {
+    toolsUsed?: string[];
+    [key: string]: any;
+  };
 }
+
+const getToolDisplayName = (toolName: string): string => {
+  const toolNames: Record<string, string> = {
+    'obtener_transacciones': 'Consultar transacciones',
+    'obtener_categorias': 'Ver categorías',
+    'gestionar_categoria': 'Gestionar categoría',
+    'obtener_reglas': 'Ver reglas',
+    'gestionar_regla': 'Gestionar regla',
+    'obtener_presupuestos': 'Ver presupuestos',
+    'gestionar_presupuesto': 'Gestionar presupuesto'
+  };
+  return toolNames[toolName] || toolName;
+};
 
 export default function AgentePage() {
   const [message, setMessage] = useState('');
@@ -126,6 +144,7 @@ export default function AgentePage() {
             type: 'bot',
             message: conv.response,
             timestamp: new Date(conv.createdAt),
+            toolsUsed: conv.context?.toolsUsed || []
           });
         });
         
@@ -316,6 +335,7 @@ export default function AgentePage() {
           type: 'bot',
           message: data.response,
           timestamp: new Date(),
+          toolsUsed: data.toolsUsed || []
         };
         setMessages(prev => [...prev, botResponse]);
       } else {
@@ -570,28 +590,41 @@ export default function AgentePage() {
                               <Avatar size="sm" bg="purple.500" icon={<FaRobot />} />
                             )}
                             
-                            <Box
-                              maxW="70%"
-                              bg={msg.type === 'user' ? userMsgBg : botMsgBg}
-                              color={msg.type === 'user' ? 'white' : 'inherit'}
-                              px={4}
-                              py={3}
-                              borderRadius="lg"
-                              borderBottomLeftRadius={msg.type === 'bot' ? 'sm' : 'lg'}
-                              borderBottomRightRadius={msg.type === 'user' ? 'sm' : 'lg'}
-                            >
-                              <Text>{msg.message}</Text>
-                              <Text
-                                fontSize="xs"
-                                color={msg.type === 'user' ? 'whiteAlpha.700' : 'gray.500'}
-                                mt={1}
+                            <VStack align={msg.type === 'user' ? 'flex-end' : 'flex-start'} spacing={1}>
+                              {/* Tool usage indicator */}
+                              {msg.type === 'bot' && msg.toolsUsed && msg.toolsUsed.length > 0 && (
+                                <HStack spacing={1} fontSize="xs">
+                                  {msg.toolsUsed.map((tool, index) => (
+                                    <Badge key={index} size="sm" variant="subtle" colorScheme="purple">
+                                      🔧 {getToolDisplayName(tool)}
+                                    </Badge>
+                                  ))}
+                                </HStack>
+                              )}
+                              
+                              <Box
+                                maxW="70%"
+                                bg={msg.type === 'user' ? userMsgBg : botMsgBg}
+                                color={msg.type === 'user' ? 'white' : 'inherit'}
+                                px={4}
+                                py={3}
+                                borderRadius="lg"
+                                borderBottomLeftRadius={msg.type === 'bot' ? 'sm' : 'lg'}
+                                borderBottomRightRadius={msg.type === 'user' ? 'sm' : 'lg'}
                               >
-                                {msg.timestamp.toLocaleTimeString('es-ES', { 
-                                  hour: '2-digit', 
-                                  minute: '2-digit' 
-                                })}
-                              </Text>
-                            </Box>
+                                <Text>{msg.message}</Text>
+                                <Text
+                                  fontSize="xs"
+                                  color={msg.type === 'user' ? 'whiteAlpha.700' : 'gray.500'}
+                                  mt={1}
+                                >
+                                  {msg.timestamp.toLocaleTimeString('es-ES', { 
+                                    hour: '2-digit', 
+                                    minute: '2-digit' 
+                                  })}
+                                </Text>
+                              </Box>
+                            </VStack>
 
                             {msg.type === 'user' && (
                               <Avatar size="sm" bg="blue.500" icon={<FaUser />} />

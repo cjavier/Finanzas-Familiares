@@ -1425,11 +1425,7 @@ export function registerRoutes(app: Express): Server {
       const { financeAgent } = await import("./agent");
 
       // Get context data
-      const [team, categories, recentTransactions] = await Promise.all([
-        storage.getTeam(user.teamId),
-        storage.getCategories(user.teamId),
-        storage.getTransactions(user.teamId, { limit: 20 })
-      ]);
+      const team = await storage.getTeam(user.teamId);
 
       if (!team) {
         return res.status(404).json({ message: "Team not found" });
@@ -1438,24 +1434,43 @@ export function registerRoutes(app: Express): Server {
       const context = {
         user,
         team,
-        categories,
-        recentTransactions
+        storage
       };
 
-      // Get AI response
-      const response = await financeAgent.chat(message, context);
+      // Load conversation history for this session
+      const conversations = await storage.getConversations(sessionId, 20); // Get last 20 messages for context
+      const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+      
+      // Convert stored conversations to the format expected by the LLM
+      conversations.reverse().forEach(conv => {
+        conversationHistory.push({ role: 'user', content: conv.message });
+        
+        // Include tool usage information in the assistant response context
+        let assistantContent = conv.response;
+        if (conv.context && typeof conv.context === 'object' && 'toolsUsed' in conv.context) {
+          const toolsUsed = conv.context.toolsUsed as string[];
+          if (Array.isArray(toolsUsed) && toolsUsed.length > 0) {
+            assistantContent += `\n\n[Herramientas utilizadas: ${toolsUsed.join(', ')}]`;
+          }
+        }
+        
+        conversationHistory.push({ role: 'assistant', content: assistantContent });
+      });
+
+      // Get AI response with conversation history
+      const result = await financeAgent.chat(message, context, conversationHistory);
 
       // Store conversation
       await storage.createConversation({
         message,
-        response,
-        context: { categories: categories.length, recentTransactions: recentTransactions.length },
+        response: result.response,
+        context: { teamId: user.teamId, userId: user.id, toolsUsed: result.toolsUsed },
         sessionId,
         teamId: user.teamId,
         userId: user.id
       });
 
-      res.json({ response });
+      res.json({ response: result.response, toolsUsed: result.toolsUsed });
     } catch (error) {
       console.error("Error in agent chat:", error);
       res.status(500).json({ message: "Failed to process chat message" });
@@ -1531,10 +1546,7 @@ export function registerRoutes(app: Express): Server {
       const { financeAgent } = await import("./agent");
 
       // Get context
-      const [team, categories] = await Promise.all([
-        storage.getTeam(user.teamId),
-        storage.getCategories(user.teamId)
-      ]);
+      const team = await storage.getTeam(user.teamId);
 
       if (!team) {
         return res.status(404).json({ message: "Team not found" });
@@ -1543,8 +1555,7 @@ export function registerRoutes(app: Express): Server {
       const context = {
         user,
         team,
-        categories,
-        recentTransactions: []
+        storage
       };
 
       // Analyze file
