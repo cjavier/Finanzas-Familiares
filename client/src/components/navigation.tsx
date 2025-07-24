@@ -18,7 +18,7 @@ import {
   Avatar,
   Text,
 } from '@chakra-ui/react';
-import { HamburgerIcon, CloseIcon, BellIcon } from '@chakra-ui/icons';
+import { HamburgerIcon, CloseIcon, BellIcon, ChevronDownIcon } from '@chakra-ui/icons';
 import { useLocation } from 'wouter';
 import { useAuth } from '@/hooks/use-auth';
 import { useQuery } from '@tanstack/react-query';
@@ -33,14 +33,18 @@ import {
   FaRuler,
   FaFile,
   FaUsers,
-  FaWizardsOfTheCoast
+  FaWizardsOfTheCoast,
+  FaCog
 } from 'react-icons/fa';
 
-const Links = [
+const MainLinks = [
   { name: 'Dashboard', href: '/dashboard', icon: FaHome },
   { name: 'Transacciones', href: '/transactions', icon: FaExchangeAlt },
-  { name: 'Categorías', href: '/categories', icon: FaTags },
   { name: 'Presupuestos', href: '/budgets', icon: FaChartPie },
+];
+
+const ConfigLinks = [
+  { name: 'Categorías', href: '/categories', icon: FaTags },
   { name: 'Asistente Rápido', href: '/quick-budget', icon: FaWizardsOfTheCoast },
   { name: 'Reglas', href: '/rules', icon: FaRuler },
   { name: 'Archivos', href: '/files', icon: FaFile },
@@ -70,6 +74,26 @@ const NavLink = ({ children, href, icon: Icon, ...rest }: any) => {
         <Text>{children}</Text>
       </HStack>
     </Link>
+  );
+};
+
+const ConfigMenuItem = ({ children, href, icon: Icon, ...rest }: any) => {
+  const [location, navigate] = useLocation();
+  const isActive = location === href;
+  
+  return (
+    <MenuItem
+      icon={<Icon size={16} />}
+      onClick={() => navigate(href)}
+      bg={isActive ? 'blue.50' : 'transparent'}
+      color={isActive ? 'blue.600' : 'inherit'}
+      _hover={{
+        bg: isActive ? 'blue.100' : 'gray.100',
+      }}
+      {...rest}
+    >
+      {children}
+    </MenuItem>
   );
 };
 
@@ -132,11 +156,38 @@ export default function Navigation() {
               Finanzas Familiares
             </Heading>
             <HStack as={'nav'} spacing={4} display={{ base: 'none', md: 'flex' }}>
-              {Links.map((link) => (
+              {MainLinks.map((link) => (
                 <NavLink key={link.name} href={link.href} icon={link.icon}>
                   {link.name}
                 </NavLink>
               ))}
+              
+              {/* Configuración Dropdown */}
+              <Menu>
+                <MenuButton
+                  as={Button}
+                  rightIcon={<ChevronDownIcon />}
+                  variant="ghost"
+                  px={2}
+                  py={1}
+                  rounded={'md'}
+                  _hover={{
+                    bg: 'gray.200',
+                  }}
+                >
+                  <HStack spacing={2}>
+                    <FaCog size={16} />
+                    <Text>Configuración</Text>
+                  </HStack>
+                </MenuButton>
+                <MenuList>
+                  {ConfigLinks.map((link) => (
+                    <ConfigMenuItem key={link.name} href={link.href} icon={link.icon}>
+                      {link.name}
+                    </ConfigMenuItem>
+                  ))}
+                </MenuList>
+              </Menu>
             </HStack>
           </HStack>
 
@@ -211,11 +262,25 @@ export default function Navigation() {
         {isOpen ? (
           <Box pb={4} display={{ md: 'none' }}>
             <Stack as={'nav'} spacing={4} px={6}>
-              {Links.map((link) => (
+              {MainLinks.map((link) => (
                 <NavLink key={link.name} href={link.href} icon={link.icon}>
                   {link.name}
                 </NavLink>
               ))}
+              
+              {/* Mobile Configuración Section */}
+              <Box>
+                <Text fontSize="sm" fontWeight="bold" color="gray.500" mb={2} px={2}>
+                  Configuración
+                </Text>
+                <Stack spacing={2} pl={4}>
+                  {ConfigLinks.map((link) => (
+                    <NavLink key={link.name} href={link.href} icon={link.icon}>
+                      {link.name}
+                    </NavLink>
+                  ))}
+                </Stack>
+              </Box>
             </Stack>
           </Box>
         ) : null}

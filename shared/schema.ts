@@ -116,8 +116,18 @@ export const transactionAuditLog = pgTable("transaction_audit_log", {
   changedAt: timestamp("changed_at").defaultNow().notNull(),
 });
 
+export const chatSessions = pgTable("chat_sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  teamId: uuid("team_id").references(() => teams.id).notNull(),
+  userId: uuid("user_id").references(() => users.id).notNull(),
+  title: text("title").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const conversations = pgTable("conversations", {
   id: uuid("id").primaryKey().defaultRandom(),
+  sessionId: uuid("session_id").references(() => chatSessions.id).notNull(),
   teamId: uuid("team_id").references(() => teams.id).notNull(),
   userId: uuid("user_id").references(() => users.id).notNull(),
   message: text("message").notNull(),
@@ -135,6 +145,7 @@ export const teamsRelations = relations(teams, ({ many }) => ({
   files: many(files),
   rules: many(rules),
   notifications: many(notifications),
+  chatSessions: many(chatSessions),
   conversations: many(conversations),
 }));
 
@@ -147,6 +158,7 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   files: many(files),
   notifications: many(notifications),
   auditLogs: many(transactionAuditLog),
+  chatSessions: many(chatSessions),
   conversations: many(conversations),
 }));
 
@@ -245,7 +257,23 @@ export const transactionAuditLogRelations = relations(transactionAuditLog, ({ on
   }),
 }));
 
+export const chatSessionsRelations = relations(chatSessions, ({ one, many }) => ({
+  team: one(teams, {
+    fields: [chatSessions.teamId],
+    references: [teams.id],
+  }),
+  user: one(users, {
+    fields: [chatSessions.userId],
+    references: [users.id],
+  }),
+  conversations: many(conversations),
+}));
+
 export const conversationsRelations = relations(conversations, ({ one }) => ({
+  session: one(chatSessions, {
+    fields: [conversations.sessionId],
+    references: [chatSessions.id],
+  }),
   team: one(teams, {
     fields: [conversations.teamId],
     references: [teams.id],
@@ -322,6 +350,14 @@ export const insertTransactionAuditLogSchema = createInsertSchema(transactionAud
   changedAt: true,
 });
 
+export const insertChatSessionSchema = createInsertSchema(chatSessions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  teamId: true,
+  userId: true,
+});
+
 export const insertConversationSchema = createInsertSchema(conversations).omit({
   id: true,
   createdAt: true,
@@ -348,5 +384,7 @@ export type Notification = typeof notifications.$inferSelect;
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 export type TransactionAuditLog = typeof transactionAuditLog.$inferSelect;
 export type InsertTransactionAuditLog = z.infer<typeof insertTransactionAuditLogSchema>;
+export type ChatSession = typeof chatSessions.$inferSelect;
+export type InsertChatSession = z.infer<typeof insertChatSessionSchema>;
 export type Conversation = typeof conversations.$inferSelect;
 export type InsertConversation = z.infer<typeof insertConversationSchema>;

@@ -6,6 +6,7 @@ import { insertTransactionSchema, insertCategorySchema, insertBudgetSchema, inse
 import multer from "multer";
 import path from "path";
 import fs from "fs/promises";
+import { createReadStream } from "fs";
 import csvParser from "csv-parser";
 import * as XLSX from "xlsx";
 
@@ -1008,7 +1009,7 @@ export function registerRoutes(app: Express): Server {
   async function processCSVFile(filePath: string): Promise<any[]> {
     return new Promise((resolve, reject) => {
       const transactions: any[] = [];
-      const readableStream = require('fs').createReadStream(filePath);
+      const readableStream = createReadStream(filePath);
 
       readableStream
         .pipe(csvParser())
@@ -1307,6 +1308,102 @@ export function registerRoutes(app: Express): Server {
   });
 
   // AI Agent routes
+  
+  // Chat session management
+  app.get("/api/agent/sessions", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const user = req.user!;
+      const chatSessions = await storage.getChatSessions(user.teamId, user.id);
+      res.json(chatSessions);
+    } catch (error) {
+      console.error("Error fetching chat sessions:", error);
+      res.status(500).json({ message: "Failed to fetch chat sessions" });
+    }
+  });
+
+  app.post("/api/agent/sessions", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const user = req.user!;
+      const { title } = req.body;
+
+      if (!title || typeof title !== 'string') {
+        return res.status(400).json({ message: "Title is required" });
+      }
+
+      const chatSession = await storage.createChatSession({
+        title,
+        teamId: user.teamId,
+        userId: user.id,
+      });
+
+      res.json(chatSession);
+    } catch (error) {
+      console.error("Error creating chat session:", error);
+      res.status(500).json({ message: "Failed to create chat session" });
+    }
+  });
+
+  app.put("/api/agent/sessions/:sessionId", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const { sessionId } = req.params;
+      const { title } = req.body;
+
+      if (!title || typeof title !== 'string') {
+        return res.status(400).json({ message: "Title is required" });
+      }
+
+      const chatSession = await storage.updateChatSession(sessionId, title);
+      res.json(chatSession);
+    } catch (error) {
+      console.error("Error updating chat session:", error);
+      res.status(500).json({ message: "Failed to update chat session" });
+    }
+  });
+
+  app.delete("/api/agent/sessions/:sessionId", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const { sessionId } = req.params;
+      await storage.deleteChatSession(sessionId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting chat session:", error);
+      res.status(500).json({ message: "Failed to delete chat session" });
+    }
+  });
+
+  app.get("/api/agent/sessions/:sessionId/conversations", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const { sessionId } = req.params;
+      const limit = parseInt(req.query.limit as string) || 50;
+
+      const conversations = await storage.getConversations(sessionId, limit);
+      res.json(conversations);
+    } catch (error) {
+      console.error("Error fetching conversation history:", error);
+      res.status(500).json({ message: "Failed to fetch conversation history" });
+    }
+  });
+
   app.post("/api/agent/chat", async (req, res) => {
     if (!req.isAuthenticated()) {
       return res.sendStatus(401);
@@ -1314,10 +1411,14 @@ export function registerRoutes(app: Express): Server {
 
     try {
       const user = req.user!;
-      const { message } = req.body;
+      const { message, sessionId } = req.body;
 
       if (!message || typeof message !== 'string') {
         return res.status(400).json({ message: "Message is required" });
+      }
+
+      if (!sessionId || typeof sessionId !== 'string') {
+        return res.status(400).json({ message: "Session ID is required" });
       }
 
       // Import agent here to avoid circular dependency issues
@@ -1349,6 +1450,7 @@ export function registerRoutes(app: Express): Server {
         message,
         response,
         context: { categories: categories.length, recentTransactions: recentTransactions.length },
+        sessionId,
         teamId: user.teamId,
         userId: user.id
       });
@@ -1360,6 +1462,7 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
+  // Legacy route for backwards compatibility
   app.get("/api/agent/history", async (req, res) => {
     if (!req.isAuthenticated()) {
       return res.sendStatus(401);
@@ -1367,9 +1470,15 @@ export function registerRoutes(app: Express): Server {
 
     try {
       const user = req.user!;
-      const limit = parseInt(req.query.limit as string) || 50;
+      // Get the most recent chat session and return its conversations
+      const chatSessions = await storage.getChatSessions(user.teamId, user.id);
+      
+      if (chatSessions.length === 0) {
+        return res.json([]);
+      }
 
-      const conversations = await storage.getConversations(user.teamId, user.id, limit);
+      const limit = parseInt(req.query.limit as string) || 50;
+      const conversations = await storage.getConversations(chatSessions[0].id, limit);
       res.json(conversations);
     } catch (error) {
       console.error("Error fetching conversation history:", error);

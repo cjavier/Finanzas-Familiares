@@ -1,10 +1,10 @@
 import { 
-  users, teams, transactions, categories, budgets, files, rules, notifications, transactionAuditLog, conversations,
+  users, teams, transactions, categories, budgets, files, rules, notifications, transactionAuditLog, chatSessions, conversations,
   type User, type InsertUser, type Team, type Transaction, type InsertTransaction,
   type Category, type InsertCategory, type Budget, type InsertBudget,
   type File, type InsertFile, type Rule, type InsertRule,
   type Notification, type InsertNotification, type TransactionAuditLog, type InsertTransactionAuditLog,
-  type Conversation, type InsertConversation
+  type ChatSession, type InsertChatSession, type Conversation, type InsertConversation
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, gte, lte, isNull, or, sum, sql, like } from "drizzle-orm";
@@ -82,9 +82,15 @@ export interface IStorage {
   getTransactionAuditLog(transactionId: string): Promise<TransactionAuditLog[]>;
   createAuditLog(auditLog: InsertTransactionAuditLog): Promise<TransactionAuditLog>;
   
+  // Chat session methods
+  getChatSessions(teamId: string, userId: string): Promise<ChatSession[]>;
+  createChatSession(chatSession: InsertChatSession & { teamId: string; userId: string }): Promise<ChatSession>;
+  updateChatSession(sessionId: string, title: string): Promise<ChatSession>;
+  deleteChatSession(sessionId: string): Promise<void>;
+  
   // Conversation methods
-  getConversations(teamId: string, userId: string, limit?: number): Promise<Conversation[]>;
-  createConversation(conversation: InsertConversation & { teamId: string; userId: string }): Promise<Conversation>;
+  getConversations(sessionId: string, limit?: number): Promise<Conversation[]>;
+  createConversation(conversation: InsertConversation & { sessionId: string; teamId: string; userId: string }): Promise<Conversation>;
   
   // Notification helpers
   createTeamActivityNotification(teamId: string, activityType: string, details: { [key: string]: any }): Promise<void>;
@@ -866,21 +872,65 @@ export class DatabaseStorage implements IStorage {
     return newAuditLog;
   }
 
-  async getConversations(teamId: string, userId: string, limit: number = 50): Promise<Conversation[]> {
+  async getChatSessions(teamId: string, userId: string): Promise<ChatSession[]> {
+    const result = await db
+      .select()
+      .from(chatSessions)
+      .where(and(
+        eq(chatSessions.teamId, teamId),
+        eq(chatSessions.userId, userId)
+      ))
+      .orderBy(desc(chatSessions.updatedAt));
+    
+    return result;
+  }
+
+  async createChatSession(chatSession: InsertChatSession & { teamId: string; userId: string }): Promise<ChatSession> {
+    const [newChatSession] = await db
+      .insert(chatSessions)
+      .values(chatSession)
+      .returning();
+    
+    return newChatSession;
+  }
+
+  async updateChatSession(sessionId: string, title: string): Promise<ChatSession> {
+    const [updatedChatSession] = await db
+      .update(chatSessions)
+      .set({ 
+        title,
+        updatedAt: new Date()
+      })
+      .where(eq(chatSessions.id, sessionId))
+      .returning();
+    
+    return updatedChatSession;
+  }
+
+  async deleteChatSession(sessionId: string): Promise<void> {
+    // Delete all conversations in the session first
+    await db
+      .delete(conversations)
+      .where(eq(conversations.sessionId, sessionId));
+    
+    // Delete the chat session
+    await db
+      .delete(chatSessions)
+      .where(eq(chatSessions.id, sessionId));
+  }
+
+  async getConversations(sessionId: string, limit: number = 50): Promise<Conversation[]> {
     const result = await db
       .select()
       .from(conversations)
-      .where(and(
-        eq(conversations.teamId, teamId),
-        eq(conversations.userId, userId)
-      ))
+      .where(eq(conversations.sessionId, sessionId))
       .orderBy(desc(conversations.createdAt))
       .limit(limit);
     
     return result;
   }
 
-  async createConversation(conversation: InsertConversation & { teamId: string; userId: string }): Promise<Conversation> {
+  async createConversation(conversation: InsertConversation & { sessionId: string; teamId: string; userId: string }): Promise<Conversation> {
     const [newConversation] = await db
       .insert(conversations)
       .values(conversation)
