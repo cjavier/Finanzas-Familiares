@@ -9,7 +9,6 @@ import {
   SimpleGrid,
   Card,
   CardBody,
-  Input,
   FormControl,
   FormLabel,
   NumberInput,
@@ -17,7 +16,6 @@ import {
   NumberInputStepper,
   NumberIncrementStepper,
   NumberDecrementStepper,
-  Badge,
   useColorModeValue,
   Icon,
   useToast,
@@ -26,42 +24,11 @@ import {
 import { useState, useEffect } from 'react';
 import { useLocation } from 'wouter';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { 
-  FaHome, 
-  FaCar, 
-  FaUtensils, 
-  FaShoppingCart, 
-  FaGamepad, 
-  FaHeartbeat,
-  FaTshirt,
-  FaGraduationCap,
-  FaPlane,
-  FaGift,
-  FaPiggyBank,
-  FaMoneyBillWave
-} from 'react-icons/fa';
 
-const defaultCategorySuggestions = [
-  { name: 'Vivienda', icon: FaHome, color: 'blue' },
-  { name: 'Transporte', icon: FaCar, color: 'green' },
-  { name: 'Alimentación', icon: FaUtensils, color: 'orange' },
-  { name: 'Compras', icon: FaShoppingCart, color: 'purple' },
-  { name: 'Entretenimiento', icon: FaGamepad, color: 'pink' },
-  { name: 'Salud', icon: FaHeartbeat, color: 'red' },
-  { name: 'Ropa', icon: FaTshirt, color: 'teal' },
-  { name: 'Educación', icon: FaGraduationCap, color: 'cyan' },
-  { name: 'Viajes', icon: FaPlane, color: 'yellow' },
-  { name: 'Regalos', icon: FaGift, color: 'gray' },
-  { name: 'Ahorros', icon: FaPiggyBank, color: 'green' },
-  { name: 'Ingresos', icon: FaMoneyBillWave, color: 'blue' },
-];
 
 export default function QuickBudgetPage() {
   const [, navigate] = useLocation();
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [customCategories, setCustomCategories] = useState<Array<{name: string, icon: any, color: string}>>([]);
   const [budgets, setBudgets] = useState<Record<string, number>>({});
-  const [newCategoryName, setNewCategoryName] = useState('');
   const toast = useToast();
   const queryClient = useQueryClient();
 
@@ -92,55 +59,60 @@ export default function QuickBudgetPage() {
     },
   });
 
-  // Pre-populate with existing data
+  // Pre-populate with existing budget data
   useEffect(() => {
-    if (existingCategories.length > 0) {
-      setSelectedCategories(existingCategories.map((cat: any) => cat.name));
-    }
-    if (existingBudgets.length > 0) {
+    if (existingBudgets.length > 0 && existingCategories.length > 0) {
       const budgetMap: Record<string, number> = {};
       existingBudgets.forEach((budget: any) => {
         const category = existingCategories.find((cat: any) => cat.id === budget.categoryId);
         if (category) {
-          budgetMap[category.name] = parseFloat(budget.amount);
+          budgetMap[category.id] = parseFloat(budget.amount);
         }
       });
       setBudgets(budgetMap);
     }
   }, [existingCategories, existingBudgets]);
 
-  const setupMutation = useMutation({
-    mutationFn: async (setupData: any) => {
-      const response = await fetch('/api/onboarding/complete', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(setupData),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to complete quick setup');
+  const createBudgetsMutation = useMutation({
+    mutationFn: async (budgetData: Array<{categoryId: string, amount: number}>) => {
+      const promises = budgetData.map(budget => 
+        fetch('/api/budgets', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            categoryId: budget.categoryId,
+            amount: budget.amount,
+            period: 'monthly'
+          }),
+        })
+      );
+      
+      const responses = await Promise.all(promises);
+      const failedRequests = responses.filter(response => !response.ok);
+      
+      if (failedRequests.length > 0) {
+        throw new Error(`Failed to create ${failedRequests.length} budgets`);
       }
-
-      return response.json();
+      
+      return { created: responses.length };
     },
     onSuccess: (result) => {
       toast({
-        title: 'Configuración completada',
-        description: `Se crearon ${result.data.categoriesCreated} categorías y ${result.data.budgetsCreated} presupuestos.`,
+        title: 'Presupuestos creados',
+        description: `Se crearon ${result.created} presupuestos exitosamente.`,
         status: 'success',
         duration: 5000,
         isClosable: true,
       });
-      queryClient.invalidateQueries({ queryKey: ['categories'] });
       queryClient.invalidateQueries({ queryKey: ['budgets'] });
       navigate('/budgets');
     },
     onError: (error) => {
       toast({
-        title: 'Error en la configuración',
-        description: 'No se pudo completar la configuración rápida. Inténtalo de nuevo.',
+        title: 'Error al crear presupuestos',
+        description: 'No se pudieron crear algunos presupuestos. Inténtalo de nuevo.',
         status: 'error',
         duration: 5000,
         isClosable: true,
@@ -148,46 +120,33 @@ export default function QuickBudgetPage() {
     },
   });
 
-  const toggleCategory = (categoryName: string) => {
-    setSelectedCategories(prev => 
-      prev.includes(categoryName) 
-        ? prev.filter(name => name !== categoryName)
-        : [...prev, categoryName]
-    );
-  };
-
-  const addCustomCategory = () => {
-    if (newCategoryName.trim()) {
-      const newCategory = {
-        name: newCategoryName.trim(),
-        icon: FaMoneyBillWave,
-        color: 'purple'
-      };
-      setCustomCategories(prev => [...prev, newCategory]);
-      setSelectedCategories(prev => [...prev, newCategoryName.trim()]);
-      setNewCategoryName('');
-    }
-  };
-
-  const setBudget = (categoryName: string, amount: number) => {
-    setBudgets(prev => ({ ...prev, [categoryName]: amount }));
+  const setBudget = (categoryId: string, amount: number) => {
+    setBudgets(prev => ({ ...prev, [categoryId]: amount }));
   };
 
   const handleComplete = () => {
-    setupMutation.mutate({
-      selectedCategories,
-      customCategories,
-      budgets
-    });
+    const budgetData = Object.entries(budgets)
+      .filter(([_, amount]) => amount > 0)
+      .map(([categoryId, amount]) => ({ categoryId, amount }));
+    
+    if (budgetData.length === 0) {
+      toast({
+        title: 'Sin presupuestos',
+        description: 'Debes configurar al menos un presupuesto.',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      });
+      return;
+    }
+    
+    createBudgetsMutation.mutate(budgetData);
   };
 
-  // Filter suggestions to exclude already existing categories
-  const availableSuggestions = defaultCategorySuggestions.filter(
-    suggestion => !existingCategories.some((existing: any) => existing.name === suggestion.name)
+  // Filter out categories that already have budgets
+  const categoriesWithoutBudgets = existingCategories.filter((category: any) => 
+    !existingBudgets.some((budget: any) => budget.categoryId === category.id)
   );
-
-  const allCategories = [...existingCategories, ...customCategories];
-  const categoriesToBudget = allCategories.filter(cat => selectedCategories.includes(cat.name));
 
   if (isLoading) {
     return (
@@ -205,103 +164,14 @@ export default function QuickBudgetPage() {
       <VStack spacing={8}>
         {/* Header */}
         <VStack spacing={4} textAlign="center">
-          <Heading color="blue.500">Asistente Rápido de Presupuesto</Heading>
+          <Heading color="blue.500">Configuración Rápida de Presupuestos</Heading>
           <Text fontSize="lg" color="gray.600">
-            Configura rápidamente nuevas categorías y presupuestos
+            Crea presupuestos para tus categorías existentes
           </Text>
         </VStack>
 
-        {/* Step 1: Select Additional Categories */}
-        <Box
-          bg={bgColor}
-          border="1px"
-          borderColor={borderColor}
-          borderRadius="lg"
-          p={8}
-          w="full"
-          boxShadow="lg"
-        >
-          <VStack spacing={6}>
-            <VStack spacing={2} textAlign="center">
-              <Heading size="lg">Agregar nuevas categorías</Heading>
-              <Text color="gray.600">Selecciona categorías adicionales que necesites</Text>
-            </VStack>
-
-            {availableSuggestions.length > 0 ? (
-              <SimpleGrid columns={{ base: 2, md: 3, lg: 4 }} spacing={4} w="full">
-                {availableSuggestions.map((category) => (
-                  <Card
-                    key={category.name}
-                    cursor="pointer"
-                    onClick={() => toggleCategory(category.name)}
-                    bg={selectedCategories.includes(category.name) ? `${category.color}.50` : 'white'}
-                    border="2px"
-                    borderColor={selectedCategories.includes(category.name) ? `${category.color}.500` : 'gray.200'}
-                    _hover={{ shadow: 'md' }}
-                    transition="all 0.2s"
-                  >
-                    <CardBody textAlign="center" py={4}>
-                      <VStack spacing={2}>
-                        <Icon as={category.icon} boxSize={8} color={`${category.color}.500`} />
-                        <Text fontSize="sm" fontWeight="medium">
-                          {category.name}
-                        </Text>
-                        {selectedCategories.includes(category.name) && (
-                          <Badge colorScheme={category.color} size="sm">
-                            Seleccionado
-                          </Badge>
-                        )}
-                      </VStack>
-                    </CardBody>
-                  </Card>
-                ))}
-              </SimpleGrid>
-            ) : (
-              <Text color="gray.500" textAlign="center">
-                Ya tienes todas las categorías sugeridas. Puedes agregar categorías personalizadas abajo.
-              </Text>
-            )}
-
-            {/* Add Custom Category */}
-            <VStack spacing={4} w="full">
-              <Text fontWeight="medium">Crear categoría personalizada</Text>
-              <HStack w="full" maxW="md">
-                <Input
-                  placeholder="Nombre de la categoría"
-                  value={newCategoryName}
-                  onChange={(e) => setNewCategoryName(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && addCustomCategory()}
-                />
-                <Button onClick={addCustomCategory} colorScheme="blue">
-                  Agregar
-                </Button>
-              </HStack>
-
-              {customCategories.length > 0 && (
-                <VStack spacing={2} w="full">
-                  <Text fontWeight="medium">Categorías personalizadas:</Text>
-                  <SimpleGrid columns={{ base: 2, md: 3 }} spacing={4} w="full">
-                    {customCategories.map((category) => (
-                      <Card key={category.name} bg={`${category.color}.50`} border="2px" borderColor={`${category.color}.500`}>
-                        <CardBody textAlign="center" py={4}>
-                          <VStack spacing={2}>
-                            <Icon as={category.icon} boxSize={6} color={`${category.color}.500`} />
-                            <Text fontSize="sm" fontWeight="medium">
-                              {category.name}
-                            </Text>
-                          </VStack>
-                        </CardBody>
-                      </Card>
-                    ))}
-                  </SimpleGrid>
-                </VStack>
-              )}
-            </VStack>
-          </VStack>
-        </Box>
-
-        {/* Step 2: Set Budgets */}
-        {categoriesToBudget.length > 0 && (
+        {/* Budget Configuration */}
+        {existingCategories.length > 0 ? (
           <Box
             bg={bgColor}
             border="1px"
@@ -314,12 +184,12 @@ export default function QuickBudgetPage() {
             <VStack spacing={6}>
               <VStack spacing={2} textAlign="center">
                 <Heading size="lg">Configurar presupuestos</Heading>
-                <Text color="gray.600">Asigna presupuestos mensuales para las categorías seleccionadas</Text>
+                <Text color="gray.600">Asigna presupuestos mensuales para tus categorías</Text>
               </VStack>
 
               <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4} w="full">
-                {categoriesToBudget.map((category) => (
-                  <Card key={category.name}>
+                {existingCategories.map((category: any) => (
+                  <Card key={category.id}>
                     <CardBody>
                       <HStack spacing={4}>
                         <Icon as={category.icon} boxSize={6} color={`${category.color}.500`} />
@@ -329,8 +199,8 @@ export default function QuickBudgetPage() {
                             <FormLabel fontSize="sm" mb={1}>Presupuesto mensual</FormLabel>
                             <NumberInput
                               min={0}
-                              value={budgets[category.name] || 0}
-                              onChange={(_, value) => setBudget(category.name, value)}
+                              value={budgets[category.id] || 0}
+                              onChange={(_, value) => setBudget(category.id, value)}
                             >
                               <NumberInputField placeholder="0" />
                               <NumberInputStepper>
@@ -347,6 +217,27 @@ export default function QuickBudgetPage() {
               </SimpleGrid>
             </VStack>
           </Box>
+        ) : (
+          <Box
+            bg={bgColor}
+            border="1px"
+            borderColor={borderColor}
+            borderRadius="lg"
+            p={8}
+            w="full"
+            boxShadow="lg"
+            textAlign="center"
+          >
+            <VStack spacing={4}>
+              <Heading size="lg" color="gray.500">No hay categorías disponibles</Heading>
+              <Text color="gray.600">
+                Necesitas crear categorías antes de poder configurar presupuestos.
+              </Text>
+              <Button colorScheme="blue" onClick={() => navigate('/categories')}>
+                Ir a Categorías
+              </Button>
+            </VStack>
+          </Box>
         )}
 
         {/* Actions */}
@@ -360,15 +251,15 @@ export default function QuickBudgetPage() {
           <Button
             colorScheme="blue"
             onClick={handleComplete}
-            isLoading={setupMutation.isPending}
-            isDisabled={selectedCategories.length === 0}
+            isLoading={createBudgetsMutation.isPending}
+            isDisabled={Object.values(budgets).every(amount => amount === 0)}
           >
-            Aplicar Configuración
+            Crear Presupuestos
           </Button>
         </HStack>
 
         <Text fontSize="sm" color="gray.500" textAlign="center">
-          Esta configuración se aplicará inmediatamente a tu equipo
+          Se crearán presupuestos mensuales para las categorías con valores mayores a 0
         </Text>
       </VStack>
     </Container>
