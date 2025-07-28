@@ -75,6 +75,9 @@ export default function QuickBudgetPage() {
 
   const createBudgetsMutation = useMutation({
     mutationFn: async (budgetData: Array<{categoryId: string, amount: number}>) => {
+      const today = new Date();
+      const startDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+      
       const promises = budgetData.map(budget => 
         fetch('/api/budgets', {
           method: 'POST',
@@ -83,8 +86,10 @@ export default function QuickBudgetPage() {
           },
           body: JSON.stringify({
             categoryId: budget.categoryId,
-            amount: budget.amount,
-            period: 'monthly'
+            amount: budget.amount.toString(),
+            period: 'monthly',
+            startDate: startDate,
+            isActive: true
           }),
         })
       );
