@@ -6,9 +6,8 @@ async function throwIfResNotOk(res: Response) {
       const errorData = await res.json();
       throw new Error(errorData.message || res.statusText);
     } catch {
-      // If JSON parsing fails, fall back to text
-      const text = (await res.text()) || res.statusText;
-      throw new Error(`${res.status}: ${text}`);
+      // If JSON parsing fails, fall back to status text (don't read response again)
+      throw new Error(`${res.status}: ${res.statusText}`);
     }
   }
 }

@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { setupAuth } from "./auth";
 import { storage } from "./storage";
+import { checkDatabaseConnection } from "./db";
 import { insertTransactionSchema, insertCategorySchema, insertBudgetSchema, insertRuleSchema, insertFileSchema } from "@shared/schema";
 import multer from "multer";
 import path from "path";
@@ -11,6 +12,16 @@ import csvParser from "csv-parser";
 import * as XLSX from "xlsx";
 
 export function registerRoutes(app: Express): Server {
+  // Check database connection on startup
+  checkDatabaseConnection().then(connected => {
+    if (!connected) {
+      console.error('⚠️  Warning: Server starting without database connection');
+      console.error('🔧 Please check your DATABASE_URL and database status');
+    }
+  }).catch(error => {
+    console.error('⚠️  Database connection check failed:', error);
+  });
+
   // sets up /api/register, /api/login, /api/logout, /api/user
   setupAuth(app);
 
@@ -2279,6 +2290,36 @@ export function registerRoutes(app: Express): Server {
       ...breakdown[category.id] || { income: 0, expenses: 0, transactions: 0 }
     }));
   }
+
+  // Health check endpoint with database status
+  app.get("/api/health", async (req, res) => {
+    try {
+      const dbConnected = await checkDatabaseConnection();
+      const status = {
+        status: dbConnected ? "healthy" : "degraded",
+        timestamp: new Date().toISOString(),
+        services: {
+          database: dbConnected ? "connected" : "disconnected",
+          server: "running"
+        },
+        environment: process.env.NODE_ENV || "unknown"
+      };
+      
+      res.status(dbConnected ? 200 : 503).json(status);
+    } catch (error) {
+      console.error("Health check failed:", error);
+      res.status(503).json({
+        status: "unhealthy",
+        timestamp: new Date().toISOString(),
+        services: {
+          database: "error",
+          server: "running"
+        },
+        error: error instanceof Error ? error.message : "Unknown error",
+        environment: process.env.NODE_ENV || "unknown"
+      });
+    }
+  });
 
   function getWeekNumber(date: Date) {
     const firstJanuary = new Date(date.getFullYear(), 0, 1);
