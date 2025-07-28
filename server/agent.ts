@@ -345,6 +345,92 @@ class FinanceAgent {
       }
     });
 
+    const createTransactionsTool = tool({
+      name: 'crear_transacciones',
+      description: 'Crea una o múltiples transacciones financieras para el equipo',
+      parameters: z.object({
+        transacciones: z.array(z.object({
+          descripcion: z.string().describe('Descripción de la transacción'),
+          monto: z.number().describe('Monto de la transacción (positivo para ingresos, negativo para gastos)'),
+          fecha: z.string().describe('Fecha de la transacción en formato YYYY-MM-DD'),
+          categoriaId: z.string().describe('ID de la categoría para la transacción'),
+          estado: z.enum(['active', 'deleted', 'pending']).nullable().optional().describe('Estado de la transacción (default: active)')
+        })).describe('Array de transacciones a crear')
+      }),
+      execute: async ({ transacciones }) => {
+        if (!this.context) {
+          return 'No hay contexto disponible';
+        }
+        
+        this.currentToolsUsed.add('crear_transacciones');
+        
+        try {
+          const categories = await this.context.storage.getCategories(this.context.team.id);
+          const createdTransactions = [];
+          const errors = [];
+          
+          for (let index = 0; index < transacciones.length; index++) {
+            const transaccion = transacciones[index];
+            try {
+              // Validar que la categoría existe
+              const category = categories.find(c => c.id === transaccion.categoriaId);
+              if (!category) {
+                errors.push(`Transacción ${index + 1}: La categoría con ID ${transaccion.categoriaId} no existe`);
+                continue;
+              }
+              
+              // Crear la transacción
+              const newTransaction = await this.context.storage.createTransaction({
+                description: transaccion.descripcion,
+                amount: transaccion.monto.toString(),
+                date: transaccion.fecha,
+                categoryId: transaccion.categoriaId,
+                status: transaccion.estado || 'active',
+                teamId: this.context.team.id,
+                userId: this.context.user.id
+              });
+              
+              createdTransactions.push({
+                id: newTransaction.id,
+                descripcion: transaccion.descripcion,
+                monto: transaccion.monto,
+                fecha: transaccion.fecha,
+                categoria: category.name,
+                estado: transaccion.estado || 'active'
+              });
+            } catch (error) {
+              errors.push(`Transacción ${index + 1} ("${transaccion.descripcion}"): ${error}`);
+            }
+          }
+          
+          let result = '';
+          
+          if (createdTransactions.length > 0) {
+            result += `✅ ${createdTransactions.length} transacciones creadas exitosamente:\n`;
+            createdTransactions.forEach((t, i) => {
+              const tipoTransaccion = t.monto >= 0 ? 'Ingreso' : 'Gasto';
+              result += `${i + 1}. ${tipoTransaccion}: "${t.descripcion}" - $${Math.abs(t.monto)} (${t.categoria}) - ${t.fecha}\n`;
+            });
+          }
+          
+          if (errors.length > 0) {
+            result += `\n❌ ${errors.length} errores encontrados:\n`;
+            errors.forEach((error, i) => {
+              result += `${i + 1}. ${error}\n`;
+            });
+          }
+          
+          if (createdTransactions.length === 0 && errors.length === 0) {
+            result = 'No se proporcionaron transacciones válidas para crear';
+          }
+          
+          return result;
+        } catch (error) {
+          return `Error creando transacciones: ${error}`;
+        }
+      }
+    });
+
 
     this.agent = new Agent({
       name: 'Asistente Financiero',
@@ -361,6 +447,7 @@ class FinanceAgent {
       
       📊 TRANSACCIONES:
       - Consultar transacciones con filtros por fecha, categoría, búsqueda de texto
+      - Crear nuevas transacciones individuales o en lote
       - Analizar patrones de gasto y tendencias
       - Proporcionar insights sobre gastos específicos
       
@@ -382,6 +469,7 @@ class FinanceAgent {
       
       HERRAMIENTAS DISPONIBLES:
       - obtener_transacciones: Consulta transacciones con filtros avanzados
+      - crear_transacciones: Crea una o múltiples transacciones financieras
       - obtener_categorias: Ve todas las categorías del equipo
       - gestionar_categoria: Crea o edita categorías
       - obtener_reglas: Ve reglas de categorización automática
@@ -400,6 +488,7 @@ class FinanceAgent {
       Cuando el usuario haga preguntas sobre transacciones, categorías, reglas o presupuestos, usa las herramientas correspondientes para obtener información actualizada y precisa.`,
       tools: [
         getTransactionsTool,
+        createTransactionsTool,
         getCategoriesTool,
         manageCategoryTool,
         getRulesTool,
@@ -449,58 +538,34 @@ class FinanceAgent {
   }
 
   // Métodos legacy para compatibilidad hacia atrás - pueden ser removidos gradualmente
-  async analyzeFile(fileContent: string, filename: string, context: AgentContext): Promise<{
-    transactions: Array<{
-      amount: number;
-      description: string;
-      date: string;
-      suggestedCategory?: string;
-      confidence?: number;
-    }>;
-    insights: string;
-  }> {
+  async analyzeFile(fileContent: string, filename: string, context: AgentContext): Promise<string> {
     try {
       this.context = context;
       const categories = await context.storage.getCategories(context.team.id);
       const categoriesContext = categories.map(cat => `${cat.name} (${cat.id})`).join(', ');
       
-      const analysisPrompt = `Analiza este contenido de archivo financiero y extrae datos de transacciones:
+      const analysisPrompt = `Analiza este contenido de archivo financiero y proporciona un análisis conversacional útil:
 
 Archivo: ${filename}
 Contenido: ${fileContent}
 
-Categorías disponibles: ${categoriesContext}
+Categorías disponibles para este equipo: ${categoriesContext}
 
-Por favor extrae transacciones y sugiere categorías. Retorna una respuesta JSON con:
-{
-  "transactions": [
-    {
-      "amount": number,
-      "description": "string",  
-      "date": "YYYY-MM-DD",
-      "suggestedCategory": "nombre de categoría",
-      "confidence": 0.0-1.0
-    }
-  ],
-  "insights": "Análisis breve de patrones de gasto encontrados"
-}`;
+Como asistente financiero, analiza este archivo y proporciona:
+1. Un resumen de lo que contiene el archivo
+2. Extrae las transacciones más importantes que encuentres
+3. Sugiere categorías apropiadas para las transacciones
+4. Identifica patrones de gasto interesantes
+5. Ofrece recomendaciones o insights útiles
+
+Responde de manera conversacional y amigable, como si fueras un asesor financiero personal explicando a un cliente lo que encontraste en su archivo.`;
 
       const result = await run(this.agent, analysisPrompt);
       
-      try {
-        return JSON.parse(result.finalOutput || '{"transactions": [], "insights": "No se pudo analizar el archivo"}');
-      } catch {
-        return {
-          transactions: [],
-          insights: result.finalOutput || 'No se pudo analizar el contenido del archivo'
-        };
-      }
+      return result.finalOutput || 'He recibido el archivo pero no pude analizarlo completamente. ¿Podrías describir qué tipo de información contiene para poder ayudarte mejor?';
     } catch (error) {
       console.error('Error de análisis de archivo:', error);
-      return {
-        transactions: [],
-        insights: 'Error analizando el contenido del archivo'
-      };
+      return 'Hubo un error al analizar el archivo. ¿Podrías intentar subirlo nuevamente o describir qué tipo de información contiene?';
     }
   }
 

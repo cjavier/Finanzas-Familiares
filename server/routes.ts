@@ -1477,6 +1477,264 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
+  // Chat with file upload
+  app.post("/api/agent/chat-with-file", upload.single('file'), async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const user = req.user!;
+      const { message = '', sessionId } = req.body;
+      const file = req.file;
+
+      if (!file) {
+        return res.status(400).json({ message: "File is required" });
+      }
+
+      if (!sessionId || typeof sessionId !== 'string') {
+        return res.status(400).json({ message: "Session ID is required" });
+      }
+
+      // Import agent here to avoid circular dependency issues
+      const { financeAgent } = await import("./agent");
+
+      // Get context data
+      const team = await storage.getTeam(user.teamId);
+
+      if (!team) {
+        return res.status(404).json({ message: "Team not found" });
+      }
+
+      const context = {
+        user,
+        team,
+        storage
+      };
+
+      // Load conversation history for this session
+      const conversations = await storage.getConversations(sessionId, 20);
+      const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+      
+      conversations.reverse().forEach(conv => {
+        conversationHistory.push({ role: 'user', content: conv.message });
+        
+        let assistantContent = conv.response;
+        if (conv.context && typeof conv.context === 'object' && 'toolsUsed' in conv.context) {
+          const toolsUsed = conv.context.toolsUsed as string[];
+          if (Array.isArray(toolsUsed) && toolsUsed.length > 0) {
+            assistantContent += `\n\n[Herramientas utilizadas: ${toolsUsed.join(', ')}]`;
+          }
+        }
+        
+        conversationHistory.push({ role: 'assistant', content: assistantContent });
+      });
+
+      // Read and process the uploaded file
+      let fileContent = '';
+      let fileAnalysis = '';
+
+      try {
+        // Determine file type and extract content
+        if (file.mimetype === 'text/csv') {
+          fileContent = await fs.readFile(file.path, 'utf-8');
+          fileAnalysis = await financeAgent.analyzeFile(fileContent, file.filename, context);
+        } else if (file.mimetype.includes('sheet') || file.filename.endsWith('.xlsx') || file.filename.endsWith('.xls')) {
+          const workbook = XLSX.readFile(file.path);
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          fileContent = XLSX.utils.sheet_to_csv(worksheet);
+          fileAnalysis = await financeAgent.analyzeFile(fileContent, file.filename, context);
+        } else if (file.mimetype === 'application/pdf') {
+          const pdfBuffer = await fs.readFile(file.path);
+          const pdf = (await import('pdf-parse')).default;
+          const pdfData = await pdf(pdfBuffer);
+          fileContent = pdfData.text;
+          fileAnalysis = await financeAgent.analyzeFile(fileContent, file.filename, context);
+        } else if (file.mimetype.startsWith('image/')) {
+          // For images, we'll create a descriptive message
+          fileAnalysis = `He recibido una imagen llamada "${file.filename}" (${(file.size / 1024 / 1024).toFixed(2)} MB). Las imágenes pueden contener capturas de pantalla de transacciones, recibos o estados de cuenta. ¿Podrías describir qué contiene esta imagen para poder ayudarte mejor?`;
+        } else {
+          // Try to read as text
+          fileContent = await fs.readFile(file.path, 'utf-8');
+          fileAnalysis = await financeAgent.analyzeFile(fileContent, file.filename, context);
+        }
+      } catch (error) {
+        console.error("Error processing file:", error);
+        fileAnalysis = `He recibido el archivo "${file.filename}", pero tuve dificultades para procesarlo. ¿Podrías describir qué tipo de información contiene para poder ayudarte mejor?`;
+      }
+
+      // Create the combined message with file context
+      const combinedMessage = message 
+        ? `${message}\n\n[Archivo adjunto: ${file.filename}]\n${fileAnalysis}`
+        : `He subido el archivo: ${file.filename}\n\n${fileAnalysis}`;
+
+      // Get AI response with file context
+      const result = await financeAgent.chat(combinedMessage, context, conversationHistory);
+
+      // Store conversation with file information
+      await storage.createConversation({
+        message: message || `He subido el archivo: ${file.filename}`,
+        response: result.response,
+        context: { 
+          teamId: user.teamId, 
+          userId: user.id, 
+          toolsUsed: result.toolsUsed,
+          fileInfo: {
+            name: file.filename,
+            size: file.size,
+            type: file.mimetype,
+            originalPath: file.path
+          }
+        },
+        sessionId,
+        teamId: user.teamId,
+        userId: user.id
+      });
+
+      // Clean up temporary file
+      try {
+        await fs.unlink(file.path);
+      } catch (error) {
+        console.error("Error cleaning up temporary file:", error);
+      }
+
+      res.json({ response: result.response, toolsUsed: result.toolsUsed });
+    } catch (error) {
+      console.error("Error in agent chat with file:", error);
+      
+      // Clean up file if it exists
+      if (req.file?.path) {
+        try {
+          await fs.unlink(req.file.path);
+        } catch (cleanupError) {
+          console.error("Error cleaning up file after error:", cleanupError);
+        }
+      }
+      
+      res.status(500).json({ message: "Failed to process chat message with file" });
+    }
+  });
+
+  // Analyze file by ID and send to chat
+  app.post("/api/agent/analyze-and-chat", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const user = req.user!;
+      const { fileId, sessionId, message } = req.body;
+
+      if (!fileId || !sessionId || !message) {
+        return res.status(400).json({ message: "File ID, session ID, and message are required" });
+      }
+
+      // Get the file from storage
+      const file = await storage.getFile(fileId, user.teamId);
+      if (!file) {
+        return res.status(404).json({ message: "File not found" });
+      }
+
+      // Import agent here to avoid circular dependency issues
+      const { financeAgent } = await import("./agent");
+
+      // Get context data
+      const team = await storage.getTeam(user.teamId);
+
+      if (!team) {
+        return res.status(404).json({ message: "Team not found" });
+      }
+
+      const context = {
+        user,
+        team,
+        storage
+      };
+
+      // Load conversation history for this session
+      const conversations = await storage.getConversations(sessionId, 20);
+      const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+      
+      conversations.reverse().forEach(conv => {
+        conversationHistory.push({ role: 'user', content: conv.message });
+        
+        let assistantContent = conv.response;
+        if (conv.context && typeof conv.context === 'object' && 'toolsUsed' in conv.context) {
+          const toolsUsed = conv.context.toolsUsed as string[];
+          if (Array.isArray(toolsUsed) && toolsUsed.length > 0) {
+            assistantContent += `\n\n[Herramientas utilizadas: ${toolsUsed.join(', ')}]`;
+          }
+        }
+        
+        conversationHistory.push({ role: 'assistant', content: assistantContent });
+      });
+
+      // Read and process the file
+      let fileContent = '';
+      let fileAnalysis = '';
+
+      try {
+        // Determine file type and extract content
+        if (file.mimetype === 'text/csv') {
+          fileContent = await fs.readFile(file.path, 'utf-8');
+          fileAnalysis = await financeAgent.analyzeFile(fileContent, file.filename, context);
+        } else if (file.mimetype.includes('sheet') || file.filename.endsWith('.xlsx') || file.filename.endsWith('.xls')) {
+          const workbook = XLSX.readFile(file.path);
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          fileContent = XLSX.utils.sheet_to_csv(worksheet);
+          fileAnalysis = await financeAgent.analyzeFile(fileContent, file.filename, context);
+        } else if (file.mimetype === 'application/pdf') {
+          const pdfBuffer = await fs.readFile(file.path);
+          const pdf = (await import('pdf-parse')).default;
+          const pdfData = await pdf(pdfBuffer);
+          fileContent = pdfData.text;
+          fileAnalysis = await financeAgent.analyzeFile(fileContent, file.filename, context);
+        } else {
+          // Try to read as text
+          fileContent = await fs.readFile(file.path, 'utf-8');
+          fileAnalysis = await financeAgent.analyzeFile(fileContent, file.filename, context);
+        }
+      } catch (error) {
+        console.error("Error processing file:", error);
+        fileAnalysis = `He recibido el archivo "${file.filename}", pero tuve dificultades para procesarlo. ¿Podrías describir qué tipo de información contiene para poder ayudarte mejor?`;
+      }
+
+      // Create the combined message with file context
+      const combinedMessage = `${message}\n\n[Archivo: ${file.filename}]\n${fileAnalysis}`;
+
+      // Get AI response with file context
+      const result = await financeAgent.chat(combinedMessage, context, conversationHistory);
+
+      // Store conversation with file information
+      await storage.createConversation({
+        message: message,
+        response: result.response,
+        context: { 
+          teamId: user.teamId, 
+          userId: user.id, 
+          toolsUsed: result.toolsUsed,
+          fileInfo: {
+            id: file.id,
+            name: file.filename,
+            size: parseInt(file.size),
+            type: file.mimetype,
+            path: file.path
+          }
+        },
+        sessionId,
+        teamId: user.teamId,
+        userId: user.id
+      });
+
+      res.json({ response: result.response, toolsUsed: result.toolsUsed });
+    } catch (error) {
+      console.error("Error in agent analyze and chat:", error);
+      res.status(500).json({ message: "Failed to process file analysis request" });
+    }
+  });
+
   // Legacy route for backwards compatibility
   app.get("/api/agent/history", async (req, res) => {
     if (!req.isAuthenticated()) {

@@ -55,6 +55,62 @@ export default function FilesPage() {
     enabled: !!user,
   });
 
+  // Create chat session and redirect
+  const createChatSessionAndRedirect = async (uploadedFile: any) => {
+    try {
+      // Create new chat session
+      const sessionResponse = await fetch('/api/agent/sessions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          title: `Análisis de ${uploadedFile.filename}`
+        }),
+      });
+
+      if (!sessionResponse.ok) {
+        throw new Error('Failed to create chat session');
+      }
+
+      const session = await sessionResponse.json();
+
+      // Send file to agent for analysis
+      const formData = new FormData();
+      
+      // Get the file blob from the uploaded file info
+      // Since we don't have the original File object here, we'll use a different approach
+      // We'll use the file ID to reference the uploaded file
+      const analysisResponse = await fetch('/api/agent/analyze-and-chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          fileId: uploadedFile.id,
+          sessionId: session.id,
+          message: 'Analiza este archivo y realiza las acciones necesarias'
+        }),
+      });
+
+      if (!analysisResponse.ok) {
+        console.error('Failed to send analysis request to agent');
+      }
+
+      // Redirect to agent page with session parameter
+      window.location.href = `/agente?sessionId=${session.id}`;
+      
+    } catch (error) {
+      console.error('Error creating chat session:', error);
+      toast({
+        title: "Archivo subido",
+        description: "El archivo se procesó correctamente, pero hubo un problema al crear la sesión de chat automática. Puedes subir el archivo manualmente en el agente.",
+      });
+    }
+  };
+
   // File upload mutation
   const uploadFileMutation = useMutation({
     mutationFn: async (fileToUpload: File) => {
@@ -74,14 +130,13 @@ export default function FilesPage() {
       
       return await res.json();
     },
-    onSuccess: () => {
+    onSuccess: async (uploadedFile) => {
       queryClient.invalidateQueries({ queryKey: ['/api/files'] });
-      toast({
-        title: "Archivo subido",
-        description: "El archivo se está procesando. Los resultados aparecerán pronto.",
-      });
       onClose();
       setUploadProgress({});
+      
+      // Create chat session and redirect to agent
+      await createChatSessionAndRedirect(uploadedFile);
     },
     onError: (error: Error) => {
       toast({

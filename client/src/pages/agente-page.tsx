@@ -27,10 +27,11 @@ import {
   useToast,
   Badge,
   Spinner,
+  Progress,
 } from '@chakra-ui/react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Navigation from '@/components/navigation';
-import { FaPaperPlane, FaFile, FaRobot, FaUser, FaPlus, FaEllipsisV, FaEdit, FaTrash, FaComments } from 'react-icons/fa';
+import { FaPaperPlane, FaFile, FaRobot, FaUser, FaPlus, FaEllipsisV, FaEdit, FaTrash, FaComments, FaUpload, FaTimes } from 'react-icons/fa';
 
 interface ChatSession {
   id: string;
@@ -45,6 +46,12 @@ interface ChatMessage {
   message: string;
   timestamp: Date;
   toolsUsed?: string[];
+  fileInfo?: {
+    name: string;
+    size: number;
+    type: string;
+    url?: string;
+  };
 }
 
 interface Conversation {
@@ -82,13 +89,32 @@ export default function AgentePage() {
   const [newSessionTitle, setNewSessionTitle] = useState('');
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   const { isOpen, onOpen, onClose } = useDisclosure();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
 
   useEffect(() => {
     loadChatSessions();
   }, []);
+
+  // Handle sessionId from URL parameters
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionIdFromUrl = urlParams.get('sessionId');
+    
+    if (sessionIdFromUrl && chatSessions.length > 0) {
+      const sessionExists = chatSessions.find(session => session.id === sessionIdFromUrl);
+      if (sessionExists) {
+        setCurrentSessionId(sessionIdFromUrl);
+        // Clear the URL parameter
+        window.history.replaceState({}, '', '/agente');
+      }
+    }
+  }, [chatSessions]);
 
   useEffect(() => {
     if (currentSessionId) {
@@ -302,6 +328,11 @@ export default function AgentePage() {
   const botMsgBg = useColorModeValue('gray.100', 'gray.600');
 
   const handleSendMessage = async () => {
+    if (selectedFile) {
+      await uploadFileAndSendMessage();
+      return;
+    }
+    
     if (!message.trim() || !currentSessionId) return;
 
     const newUserMessage: ChatMessage = {
@@ -369,8 +400,141 @@ export default function AgentePage() {
   };
 
   const handleFileUpload = () => {
-    // TODO: Implement file upload integration with files page
-    window.location.href = '/files';
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      // Check file type
+      const allowedTypes = [
+        'application/pdf',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'text/csv',
+        'image/jpeg',
+        'image/png',
+        'image/gif',
+        'image/webp'
+      ];
+      
+      if (!allowedTypes.includes(file.type)) {
+        toast({
+          title: 'Tipo de archivo no compatible',
+          description: 'Solo se permiten archivos PDF, Excel, CSV e imágenes (JPG, PNG, GIF, WebP)',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        });
+        return;
+      }
+      
+      // Check file size (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        toast({
+          title: 'Archivo demasiado grande',
+          description: 'El archivo no puede superar los 10MB',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        });
+        return;
+      }
+      
+      setSelectedFile(file);
+    }
+  };
+
+  const removeSelectedFile = () => {
+    setSelectedFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const uploadFileAndSendMessage = async () => {
+    if (!selectedFile || !currentSessionId) return;
+
+    setIsUploading(true);
+    setUploadProgress(0);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      formData.append('sessionId', currentSessionId);
+      formData.append('message', message.trim() || `He subido el archivo: ${selectedFile.name}`);
+
+      // Add user message with file info
+      const userMessage: ChatMessage = {
+        id: Date.now().toString(),
+        type: 'user',
+        message: message.trim() || `He subido el archivo: ${selectedFile.name}`,
+        timestamp: new Date(),
+        fileInfo: {
+          name: selectedFile.name,
+          size: selectedFile.size,
+          type: selectedFile.type
+        }
+      };
+
+      setMessages(prev => [...prev, userMessage]);
+      setMessage('');
+      
+      // Simulate upload progress
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => {
+          if (prev >= 90) {
+            clearInterval(progressInterval);
+            return 90;
+          }
+          return prev + 10;
+        });
+      }, 200);
+
+      const response = await fetch('/api/agent/chat-with-file', {
+        method: 'POST',
+        body: formData,
+      });
+
+      clearInterval(progressInterval);
+      setUploadProgress(100);
+
+      if (response.ok) {
+        const data = await response.json();
+        const botResponse: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          type: 'bot',
+          message: data.response,
+          timestamp: new Date(),
+          toolsUsed: data.toolsUsed || []
+        };
+        setMessages(prev => [...prev, botResponse]);
+      } else {
+        const errorResponse: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          type: 'bot',
+          message: 'Lo siento, hubo un error al procesar el archivo. Por favor, inténtalo de nuevo.',
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, errorResponse]);
+      }
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      const errorResponse: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        type: 'bot',
+        message: 'Lo siento, no pude procesar el archivo. Verifica tu conexión e inténtalo de nuevo.',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorResponse]);
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(0);
+      setSelectedFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
   };
 
   const handleQuickAction = async (actionType: string) => {
@@ -612,6 +776,20 @@ export default function AgentePage() {
                                 borderBottomLeftRadius={msg.type === 'bot' ? 'sm' : 'lg'}
                                 borderBottomRightRadius={msg.type === 'user' ? 'sm' : 'lg'}
                               >
+                                {/* File info if present */}
+                                {msg.fileInfo && (
+                                  <VStack align="start" spacing={2} mb={2}>
+                                    <HStack spacing={2} p={2} bg={msg.type === 'user' ? 'whiteAlpha.200' : 'gray.100'} borderRadius="md">
+                                      <FaFile color={msg.type === 'user' ? 'white' : 'gray'} />
+                                      <VStack align="start" spacing={0}>
+                                        <Text fontSize="sm" fontWeight="medium">{msg.fileInfo.name}</Text>
+                                        <Text fontSize="xs" opacity={0.8}>
+                                          {(msg.fileInfo.size / 1024 / 1024).toFixed(2)} MB
+                                        </Text>
+                                      </VStack>
+                                    </HStack>
+                                  </VStack>
+                                )}
                                 <Text>{msg.message}</Text>
                                 <Text
                                   fontSize="xs"
@@ -654,6 +832,34 @@ export default function AgentePage() {
                     {/* Input Area */}
                     <Box p={4}>
                       <VStack spacing={3}>
+                        {/* File Upload Progress */}
+                        {isUploading && (
+                          <Box w="full">
+                            <Text fontSize="sm" mb={2}>Subiendo archivo...</Text>
+                            <Progress value={uploadProgress} colorScheme="purple" size="sm" />
+                          </Box>
+                        )}
+
+                        {/* Selected File Display */}
+                        {selectedFile && (
+                          <HStack w="full" p={3} bg="purple.50" borderRadius="md" spacing={3}>
+                            <FaFile color="purple" />
+                            <VStack align="start" spacing={0} flex={1}>
+                              <Text fontSize="sm" fontWeight="medium">{selectedFile.name}</Text>
+                              <Text fontSize="xs" color="gray.600">
+                                {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                              </Text>
+                            </VStack>
+                            <IconButton
+                              aria-label="Remover archivo"
+                              icon={<FaTimes />}
+                              size="sm"
+                              variant="ghost"
+                              onClick={removeSelectedFile}
+                            />
+                          </HStack>
+                        )}
+
                         {/* Quick Actions */}
                         <HStack spacing={2} w="full" overflowX="auto">
                           <Button size="sm" variant="outline" onClick={handleFileUpload}>
@@ -675,26 +881,35 @@ export default function AgentePage() {
 
                         {/* Message Input */}
                         <HStack spacing={2} w="full">
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept=".pdf,.xlsx,.xls,.csv,image/*"
+                            style={{ display: 'none' }}
+                            onChange={handleFileSelect}
+                          />
                           <IconButton
                             aria-label="Subir archivo"
-                            icon={<FaFile />}
+                            icon={selectedFile ? <FaUpload /> : <FaFile />}
                             variant="outline"
+                            colorScheme={selectedFile ? 'purple' : 'gray'}
                             onClick={handleFileUpload}
                           />
                           <Input
-                            placeholder="Escribe tu mensaje aquí... (Presiona Enter para enviar)"
+                            placeholder={selectedFile ? "Escribe un mensaje opcional sobre el archivo..." : "Escribe tu mensaje aquí... (Presiona Enter para enviar)"}
                             value={message}
                             onChange={(e) => setMessage(e.target.value)}
                             onKeyPress={handleKeyPress}
                             flex={1}
-                            isDisabled={!currentSessionId}
+                            isDisabled={!currentSessionId || isUploading}
                           />
                           <IconButton
                             aria-label="Enviar mensaje"
                             icon={<FaPaperPlane />}
                             colorScheme="purple"
                             onClick={handleSendMessage}
-                            isDisabled={!message.trim() || isLoading || !currentSessionId}
+                            isDisabled={(!message.trim() && !selectedFile) || isLoading || !currentSessionId || isUploading}
+                            isLoading={isLoading || isUploading}
                           />
                         </HStack>
                       </VStack>
