@@ -2124,6 +2124,30 @@ export function registerRoutes(app: Express): Server {
 
     try {
       const user = req.user!;
+      const { period = 'current-month' } = req.query;
+      
+      // Calculate date range based on period
+      let fromDate: string;
+      let toDate: string;
+      const now = new Date();
+      
+      switch (period) {
+        case 'last-month':
+          const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          fromDate = lastMonth.toISOString().slice(0, 7) + '-01';
+          toDate = new Date(lastMonth.getFullYear(), lastMonth.getMonth() + 1, 0).toISOString().slice(0, 10);
+          break;
+        case 'current-year':
+          fromDate = `${now.getFullYear()}-01-01`;
+          toDate = `${now.getFullYear()}-12-31`;
+          break;
+        case 'current-month':
+        default:
+          const currentMonth = now.toISOString().slice(0, 7);
+          fromDate = `${currentMonth}-01`;
+          toDate = `${currentMonth}-31`;
+          break;
+      }
       
       // Get dashboard summary data
       const [
@@ -2144,38 +2168,38 @@ export function registerRoutes(app: Express): Server {
         return res.status(404).json({ message: "Team not found" });
       }
 
-      // Calculate summary statistics
-      const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
-      const monthlyTransactions = await storage.getTransactions(user.teamId, {
-        fromDate: `${currentMonth}-01`,
-        toDate: `${currentMonth}-31`
+      // Calculate summary statistics for selected period
+      const periodTransactions = await storage.getTransactions(user.teamId, {
+        fromDate,
+        toDate
       });
 
-      const totalIncome = monthlyTransactions
+      const totalIncome = periodTransactions
         .filter(t => parseFloat(t.amount) > 0)
         .reduce((sum, t) => sum + parseFloat(t.amount), 0);
 
-      const totalExpenses = monthlyTransactions
+      const totalExpenses = periodTransactions
         .filter(t => parseFloat(t.amount) < 0)
         .reduce((sum, t) => sum + Math.abs(parseFloat(t.amount)), 0);
 
       const netFlow = totalIncome - totalExpenses;
 
-      // Calculate budget analytics
-      const budgetSummary = await calculateBudgetSummary(user.teamId, budgets, currentMonth);
+      // Calculate budget analytics for the selected period
+      const periodMonth = fromDate.slice(0, 7); // Use the period's month for budget calculations
+      const budgetSummary = await calculateBudgetSummary(user.teamId, budgets, periodMonth);
 
       // Get unread notifications count
       const unreadNotifications = notifications.filter(n => !n.isRead).length;
 
-      // Get spending by category for current month
-      const spendingByCategory = await calculateSpendingByCategory(user.teamId, currentMonth);
+      // Get spending by category for selected period
+      const spendingByCategory = await calculateSpendingByCategory(user.teamId, periodMonth);
 
       const dashboard = {
         summary: {
           totalIncome,
           totalExpenses,
           netFlow,
-          transactionCount: monthlyTransactions.length
+          transactionCount: periodTransactions.length
         },
         budgets: budgetSummary,
         recentTransactions: recentTransactions.slice(0, 5),

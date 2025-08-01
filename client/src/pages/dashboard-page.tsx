@@ -23,8 +23,10 @@ import {
 } from '@chakra-ui/react';
 import { useLocation } from 'wouter';
 import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import Navigation from '@/components/navigation';
 import { useAuth } from '@/hooks/use-auth';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { apiRequest } from '@/lib/queryClient';
 import { Category, Transaction, Notification } from '@shared/schema';
 import { 
@@ -117,14 +119,16 @@ interface DashboardData {
 export default function DashboardPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
+  const isMobile = useIsMobile();
+  const [selectedPeriod, setSelectedPeriod] = useState('current-month');
   const cardBg = useColorModeValue('white', 'gray.700');
   const statBg = useColorModeValue('gray.50', 'gray.800');
 
   // Fetch dashboard data
   const { data: dashboardData, isLoading } = useQuery<DashboardData>({
-    queryKey: ['/api/dashboard'],
+    queryKey: ['/api/dashboard', selectedPeriod],
     queryFn: async () => {
-      const res = await apiRequest('GET', '/api/dashboard');
+      const res = await apiRequest('GET', `/api/dashboard?period=${selectedPeriod}`);
       return await res.json();
     },
     enabled: !!user,
@@ -163,6 +167,15 @@ export default function DashboardPage() {
     }
   };
 
+  const getPeriodLabel = (period: string) => {
+    switch (period) {
+      case 'current-month': return 'Este mes';
+      case 'last-month': return 'Mes pasado';
+      case 'current-year': return 'Este año';
+      default: return 'Este mes';
+    }
+  };
+
   if (isLoading || !dashboardData) {
     return (
       <Box>
@@ -181,37 +194,82 @@ export default function DashboardPage() {
       <Container maxW="7xl" py={8}>
         <VStack spacing={8} align="stretch">
           {/* Header */}
-          <HStack justify="space-between" align="center">
-            <VStack align="start" spacing={1}>
-              <Heading size="lg">Dashboard</Heading>
-              <Text color="gray.600">Resumen del estado financiero de tu familia</Text>
-            </VStack>
-            
-            <HStack spacing={3}>
-              <Select w="auto" defaultValue="current-month">
+          {isMobile ? (
+            <VStack spacing={4} align="stretch">
+              <VStack align="start" spacing={1}>
+                <Heading size="lg">Dashboard</Heading>
+                <Text color="gray.600">Resumen del estado financiero de tu familia</Text>
+              </VStack>
+              
+              {/* Primary CTAs on mobile */}
+              <VStack spacing={3} align="stretch">
+                <Button 
+                  size="lg" 
+                  colorScheme="purple" 
+                  leftIcon={<FaRobot />} 
+                  onClick={() => navigate('/agente')}
+                  py={6}
+                >
+                  🤖 Agente de IA
+                </Button>
+                
+                <Button 
+                  size="lg" 
+                  colorScheme="blue" 
+                  leftIcon={<FaPlus />} 
+                  onClick={() => navigate('/transactions/add')}
+                  py={6}
+                >
+                  ➕ Nueva Transacción
+                </Button>
+              </VStack>
+              
+              <Select 
+                value={selectedPeriod} 
+                onChange={(e) => setSelectedPeriod(e.target.value)}
+              >
                 <option value="current-month">Este mes</option>
                 <option value="last-month">Mes pasado</option>
                 <option value="current-year">Este año</option>
               </Select>
+            </VStack>
+          ) : (
+            <HStack justify="space-between" align="center">
+              <VStack align="start" spacing={1}>
+                <Heading size="lg">Dashboard</Heading>
+                <Text color="gray.600">Resumen del estado financiero de tu familia</Text>
+              </VStack>
               
-              <Button colorScheme="blue" leftIcon={<FaPlus />} onClick={() => navigate('/transactions/add')}>
-                Nueva Transacción
-              </Button>
-              
-              <Button colorScheme="purple" leftIcon={<FaRobot />} onClick={() => navigate('/agente')}>
-                Agente IA
-              </Button>
+              <HStack spacing={3}>
+                <Select 
+                  w="auto" 
+                  value={selectedPeriod} 
+                  onChange={(e) => setSelectedPeriod(e.target.value)}
+                >
+                  <option value="current-month">Este mes</option>
+                  <option value="last-month">Mes pasado</option>
+                  <option value="current-year">Este año</option>
+                </Select>
+                
+                <Button colorScheme="blue" leftIcon={<FaPlus />} onClick={() => navigate('/transactions/add')}>
+                  Nueva Transacción
+                </Button>
+                
+                <Button colorScheme="purple" leftIcon={<FaRobot />} onClick={() => navigate('/agente')}>
+                  Agente IA
+                </Button>
+              </HStack>
             </HStack>
-          </HStack>
+          )}
 
           {/* Summary Stats */}
-          <SimpleGrid columns={{ base: 1, md: 4 }} spacing={6}>
+          <SimpleGrid columns={{ base: 2, md: 4 }} spacing={isMobile ? 3 : 6}>
             <Card bg={statBg}>
               <CardBody>
                 <Stat>
                   <StatLabel>Ingresos</StatLabel>
                   <StatNumber color="green.500">${dashboardData.summary.totalIncome.toLocaleString()}</StatNumber>
-                  <StatHelpText>Este mes</StatHelpText>
+                  <StatHelpText>{getPeriodLabel(selectedPeriod)}</StatHelpText>
                 </Stat>
               </CardBody>
             </Card>
@@ -249,7 +307,7 @@ export default function DashboardPage() {
                 <Stat>
                   <StatLabel>Transacciones</StatLabel>
                   <StatNumber>{dashboardData.summary.transactionCount}</StatNumber>
-                  <StatHelpText>Este mes</StatHelpText>
+                  <StatHelpText>{getPeriodLabel(selectedPeriod)}</StatHelpText>
                 </Stat>
               </CardBody>
             </Card>
@@ -332,12 +390,12 @@ export default function DashboardPage() {
           {/* Spending by Category Chart */}
           <Card bg={cardBg}>
             <CardHeader>
-              <Heading size="md">Gastos por Categoría (Este Mes)</Heading>
+              <Heading size="md">Gastos por Categoría ({getPeriodLabel(selectedPeriod)})</Heading>
             </CardHeader>
             <CardBody>
               {dashboardData.spendingByCategory.length === 0 ? (
                 <Text color="gray.500" textAlign="center" py={8}>
-                  No hay gastos registrados este mes
+                  No hay gastos registrados en {getPeriodLabel(selectedPeriod).toLowerCase()}
                 </Text>
               ) : (
                 <VStack spacing={4} align="stretch">
@@ -396,30 +454,51 @@ export default function DashboardPage() {
           {/* Quick Actions & Notifications */}
           <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
             {/* Quick Actions */}
-            <Card bg={cardBg}>
-              <CardHeader>
-                <Heading size="md">Acciones Rápidas</Heading>
-              </CardHeader>
-              <CardBody>
-                <VStack spacing={3}>
-                  <Button 
-                    w="full" 
-                    leftIcon={<FaPlus />} 
-                    onClick={() => navigate('/transactions/add')}
-                    colorScheme="blue"
-                  >
-                    Agregar Transacción
-                  </Button>
-                  
-                  <Button 
-                    w="full" 
-                    leftIcon={<FaRobot />} 
-                    onClick={() => navigate('/agente')}
-                    colorScheme="purple"
-                  >
-                    Abrir Agente IA
-                  </Button>
-                  
+            {!isMobile && (
+              <Card bg={cardBg}>
+                <CardHeader>
+                  <Heading size="md">Acciones Rápidas</Heading>
+                </CardHeader>
+                <CardBody>
+                  <VStack spacing={3}>
+                    <Button 
+                      w="full" 
+                      leftIcon={<FaPlus />} 
+                      onClick={() => navigate('/transactions/add')}
+                      colorScheme="blue"
+                    >
+                      Agregar Transacción
+                    </Button>
+                    
+                    <Button 
+                      w="full" 
+                      leftIcon={<FaRobot />} 
+                      onClick={() => navigate('/agente')}
+                      colorScheme="purple"
+                    >
+                      Abrir Agente IA
+                    </Button>
+                    
+                    <Button 
+                      w="full" 
+                      leftIcon={<FaWallet />} 
+                      onClick={() => navigate('/budgets')}
+                      variant="outline"
+                    >
+                      Gestionar Presupuestos
+                    </Button>
+                  </VStack>
+                </CardBody>
+              </Card>
+            )}
+            
+            {/* Mobile Quick Actions - Just Budgets */}
+            {isMobile && (
+              <Card bg={cardBg}>
+                <CardHeader>
+                  <Heading size="md">Acciones Adicionales</Heading>
+                </CardHeader>
+                <CardBody>
                   <Button 
                     w="full" 
                     leftIcon={<FaWallet />} 
@@ -428,9 +507,9 @@ export default function DashboardPage() {
                   >
                     Gestionar Presupuestos
                   </Button>
-                </VStack>
-              </CardBody>
-            </Card>
+                </CardBody>
+              </Card>
+            )}
 
             {/* Recent Notifications & Alerts */}
             <Card bg={cardBg}>

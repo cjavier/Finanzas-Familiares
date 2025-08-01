@@ -28,12 +28,16 @@ import {
   Badge,
   Spinner,
   Progress,
+  useBreakpointValue,
+  Slide,
+  Collapse,
 } from '@chakra-ui/react';
 import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import Navigation from '@/components/navigation';
-import { FaPaperPlane, FaFile, FaRobot, FaUser, FaPlus, FaEllipsisV, FaEdit, FaTrash, FaComments, FaUpload, FaTimes, FaImage } from 'react-icons/fa';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { FaPaperPlane, FaFile, FaRobot, FaUser, FaPlus, FaEllipsisV, FaEdit, FaTrash, FaComments, FaUpload, FaTimes, FaImage, FaBars } from 'react-icons/fa';
 
 interface ChatSession {
   id: string;
@@ -192,11 +196,16 @@ export default function AgentePage() {
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // Sidebar closed by default
 
   const { isOpen, onOpen, onClose } = useDisclosure();
+  const { isOpen: isSidebarDrawerOpen, onOpen: onSidebarDrawerOpen, onClose: onSidebarDrawerClose } = useDisclosure();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const toast = useToast();
+  const isMobile = useIsMobile();
+  const sidebarWidth = useBreakpointValue({ base: '300px', md: '350px', lg: '400px' });
 
   useEffect(() => {
     loadChatSessions();
@@ -224,6 +233,26 @@ export default function AgentePage() {
       setMessages([]);
     }
   }, [currentSessionId]);
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    if (messagesContainerRef.current) {
+      // Use requestAnimationFrame to ensure DOM has updated
+      requestAnimationFrame(() => {
+        if (messagesContainerRef.current) {
+          messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+        }
+      });
+    }
+  }, [messages]);
+
+  const toggleSidebar = () => {
+    if (isMobile) {
+      onSidebarDrawerOpen();
+    } else {
+      setSidebarOpen(!sidebarOpen);
+    }
+  };
 
   const loadChatSessions = async () => {
     try {
@@ -287,6 +316,17 @@ export default function AgentePage() {
           };
           setMessages([welcomeMessage]);
         }
+        
+        // Scroll to bottom after loading conversation
+        setTimeout(() => {
+          if (messagesContainerRef.current) {
+            requestAnimationFrame(() => {
+              if (messagesContainerRef.current) {
+                messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+              }
+            });
+          }
+        }, 100);
       }
     } catch (error) {
       console.error('Error loading conversation history:', error);
@@ -453,6 +493,7 @@ export default function AgentePage() {
     setMessage('');
     setIsLoading(true);
 
+
     try {
       const response = await fetch('/api/agent/chat', {
         method: 'POST',
@@ -475,6 +516,7 @@ export default function AgentePage() {
           toolsUsed: data.toolsUsed || []
         };
         setMessages(prev => [...prev, botResponse]);
+    
       } else {
         const errorResponse: ChatMessage = {
           id: (Date.now() + 1).toString(),
@@ -483,6 +525,7 @@ export default function AgentePage() {
           timestamp: new Date(),
         };
         setMessages(prev => [...prev, errorResponse]);
+    
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -493,6 +536,7 @@ export default function AgentePage() {
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, errorResponse]);
+  
     } finally {
       setIsLoading(false);
     }
@@ -683,6 +727,7 @@ export default function AgentePage() {
           toolsUsed: data.toolsUsed || []
         };
         setMessages(prev => [...prev, botResponse]);
+    
       } else {
         const errorResponse: ChatMessage = {
           id: (Date.now() + 1).toString(),
@@ -701,6 +746,7 @@ export default function AgentePage() {
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, errorResponse]);
+  
     } finally {
       setIsUploading(false);
       setUploadProgress(0);
@@ -770,6 +816,7 @@ export default function AgentePage() {
           toolsUsed: data.toolsUsed || []
         };
         setMessages(prev => [...prev, botResponse]);
+    
       } else {
         const errorResponse: ChatMessage = {
           id: (Date.now() + 1).toString(),
@@ -788,6 +835,7 @@ export default function AgentePage() {
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, errorResponse]);
+  
     } finally {
       setIsUploading(false);
       setUploadProgress(0);
@@ -824,420 +872,594 @@ export default function AgentePage() {
 
   const currentSession = chatSessions.find(s => s.id === currentSessionId);
 
+  // Sidebar Content Component
+  const SidebarContent = () => (
+    <VStack spacing={4} align="stretch" h="full">
+      {/* Header with New Chat Button and Collapse */}
+      <HStack justify="space-between" align="center">
+        <Heading size="md" color="purple.500">Chats</Heading>
+        <HStack spacing={2}>
+          <Button 
+            size="sm" 
+            colorScheme="purple" 
+            leftIcon={<FaPlus />}
+            onClick={onOpen}
+          >
+            Nuevo
+          </Button>
+          {!isMobile && (
+            <IconButton
+              aria-label="Contraer sidebar"
+              icon={<FaTimes />}
+              size="sm"
+              variant="ghost"
+              onClick={() => setSidebarOpen(false)}
+            />
+          )}
+        </HStack>
+      </HStack>
+
+      {/* Chat Sessions List */}
+      <Card flex={1} maxH={isMobile ? "calc(100vh - 200px)" : "calc(100vh - 200px)"}>
+        <CardBody p={2}>
+          {isLoadingSessions ? (
+            <Flex justify="center" align="center" h="100px">
+              <Spinner size="md" color="purple.500" />
+            </Flex>
+          ) : chatSessions.length === 0 ? (
+            <VStack spacing={4} align="center" py={8}>
+              <FaComments size={40} color="gray" />
+              <Text color="gray.500" textAlign="center">
+                No hay sesiones de chat.
+                <br />
+                Crea una nueva para empezar.
+              </Text>
+            </VStack>
+          ) : (
+            <VStack spacing={2} align="stretch">
+              {chatSessions.map((session) => (
+                <Card
+                  key={session.id}
+                  variant={currentSessionId === session.id ? 'elevated' : 'outline'}
+                  bg={currentSessionId === session.id ? 'purple.50' : 'transparent'}
+                  cursor="pointer"
+                  onClick={() => {
+                    setCurrentSessionId(session.id);
+                    if (isMobile) {
+                      onSidebarDrawerClose();
+                    }
+                  }}
+                  _hover={{ bg: 'gray.50' }}
+                >
+                  <CardBody p={3}>
+                    <HStack justify="space-between" align="start">
+                      <VStack align="start" spacing={1} flex={1}>
+                        {editingSessionId === session.id ? (
+                          <Input
+                            size="sm"
+                            value={editingTitle}
+                            onChange={(e) => setEditingTitle(e.target.value)}
+                            onBlur={() => {
+                              if (editingTitle.trim()) {
+                                updateSessionTitle(session.id, editingTitle);
+                              } else {
+                                setEditingSessionId(null);
+                                setEditingTitle('');
+                              }
+                            }}
+                            onKeyPress={(e) => {
+                              if (e.key === 'Enter') {
+                                if (editingTitle.trim()) {
+                                  updateSessionTitle(session.id, editingTitle);
+                                } else {
+                                  setEditingSessionId(null);
+                                  setEditingTitle('');
+                                }
+                              }
+                            }}
+                            autoFocus
+                          />
+                        ) : (
+                          <Text fontSize="sm" fontWeight="medium" noOfLines={2}>
+                            {session.title}
+                          </Text>
+                        )}
+                        <Text fontSize="xs" color="gray.500">
+                          {new Date(session.updatedAt).toLocaleDateString('es-ES')}
+                        </Text>
+                      </VStack>
+                      
+                      <Menu>
+                        <MenuButton
+                          as={IconButton}
+                          icon={<FaEllipsisV />}
+                          size="xs"
+                          variant="ghost"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <MenuList fontSize="sm">
+                          <MenuItem 
+                            icon={<FaEdit />}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingSessionId(session.id);
+                              setEditingTitle(session.title);
+                            }}
+                          >
+                            Editar título
+                          </MenuItem>
+                          <MenuItem 
+                            icon={<FaTrash />}
+                            color="red.500"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteSession(session.id);
+                            }}
+                          >
+                            Eliminar
+                          </MenuItem>
+                        </MenuList>
+                      </Menu>
+                    </HStack>
+                    
+                    {currentSessionId === session.id && (
+                      <Badge colorScheme="purple" size="sm" mt={2}>
+                        Activo
+                      </Badge>
+                    )}
+                  </CardBody>
+                </Card>
+              ))}
+            </VStack>
+          )}
+        </CardBody>
+      </Card>
+    </VStack>
+  );
+
   return (
-    <Box>
+    <Box h="100vh" display="flex" flexDirection="column">
       <Navigation />
       
-      <Container maxW="8xl" py={8} h="calc(100vh - 120px)">
-        <Flex h="full" gap={0}>
-          {/* Chat Sessions Sidebar */}
-          <Box w="300px" mr={6}>
-            <VStack spacing={4} align="stretch">
-              {/* Header with New Chat Button */}
-              <HStack justify="space-between">
-                <Heading size="md" color="purple.500">Chats</Heading>
-                <Button 
-                  size="sm" 
-                  colorScheme="purple" 
-                  leftIcon={<FaPlus />}
+      <Flex flex={1} overflow="hidden" position="relative">
+        {/* Always visible sidebar toggle strip */}
+        {!isMobile && (
+          <Box
+            w={sidebarOpen ? sidebarWidth : "60px"}
+            minW={sidebarOpen ? sidebarWidth : "60px"}
+            h="calc(100vh - 80px)"
+            bg="white"
+            borderRight="1px"
+            borderColor="gray.200"
+            transition="width 0.3s ease"
+            flexShrink={0}
+            position="relative"
+          >
+            {sidebarOpen ? (
+              // Full sidebar content
+              <Box p={4} h="full">
+                <SidebarContent />
+              </Box>
+            ) : (
+              // Collapsed sidebar - just toggle buttons
+              <VStack 
+                spacing={3} 
+                align="center" 
+                py={4} 
+                h="full"
+                justify="start"
+              >
+                <IconButton
+                  aria-label="Abrir chats"
+                  icon={<FaBars />}
+                  size="sm"
+                  colorScheme="purple"
+                  variant="ghost"
+                  onClick={toggleSidebar}
+                />
+                <IconButton
+                  aria-label="Nueva sesión"
+                  icon={<FaPlus />}
+                  size="sm"
+                  colorScheme="green"
+                  variant="ghost"
                   onClick={onOpen}
-                >
-                  Nuevo
-                </Button>
-              </HStack>
+                />
+              </VStack>
+            )}
+          </Box>
+        )}
 
-              {/* Chat Sessions List */}
-              <Card flex={1} maxH="calc(100vh - 200px)">
-                <CardBody p={2}>
-                  {isLoadingSessions ? (
-                    <Flex justify="center" align="center" h="100px">
-                      <Spinner size="md" color="purple.500" />
-                    </Flex>
-                  ) : chatSessions.length === 0 ? (
-                    <VStack spacing={4} align="center" py={8}>
-                      <FaComments size={40} color="gray" />
-                      <Text color="gray.500" textAlign="center">
-                        No hay sesiones de chat.
-                        <br />
-                        Crea una nueva para empezar.
-                      </Text>
-                    </VStack>
-                  ) : (
-                    <VStack spacing={2} align="stretch">
-                      {chatSessions.map((session) => (
-                        <Card
-                          key={session.id}
-                          variant={currentSessionId === session.id ? 'elevated' : 'outline'}
-                          bg={currentSessionId === session.id ? 'purple.50' : 'transparent'}
-                          cursor="pointer"
-                          onClick={() => setCurrentSessionId(session.id)}
-                          _hover={{ bg: 'gray.50' }}
-                        >
-                          <CardBody p={3}>
-                            <HStack justify="space-between" align="start">
-                              <VStack align="start" spacing={1} flex={1}>
-                                {editingSessionId === session.id ? (
-                                  <Input
-                                    size="sm"
-                                    value={editingTitle}
-                                    onChange={(e) => setEditingTitle(e.target.value)}
-                                    onBlur={() => {
-                                      if (editingTitle.trim()) {
-                                        updateSessionTitle(session.id, editingTitle);
-                                      } else {
-                                        setEditingSessionId(null);
-                                        setEditingTitle('');
-                                      }
-                                    }}
-                                    onKeyPress={(e) => {
-                                      if (e.key === 'Enter') {
-                                        if (editingTitle.trim()) {
-                                          updateSessionTitle(session.id, editingTitle);
-                                        } else {
-                                          setEditingSessionId(null);
-                                          setEditingTitle('');
-                                        }
-                                      }
-                                    }}
-                                    autoFocus
-                                  />
-                                ) : (
-                                  <Text fontSize="sm" fontWeight="medium" noOfLines={2}>
-                                    {session.title}
-                                  </Text>
-                                )}
-                                <Text fontSize="xs" color="gray.500">
-                                  {new Date(session.updatedAt).toLocaleDateString('es-ES')}
-                                </Text>
-                              </VStack>
-                              
-                              <Menu>
-                                <MenuButton
-                                  as={IconButton}
-                                  icon={<FaEllipsisV />}
-                                  size="xs"
-                                  variant="ghost"
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                                <MenuList fontSize="sm">
-                                  <MenuItem 
-                                    icon={<FaEdit />}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setEditingSessionId(session.id);
-                                      setEditingTitle(session.title);
-                                    }}
-                                  >
-                                    Editar título
-                                  </MenuItem>
-                                  <MenuItem 
-                                    icon={<FaTrash />}
-                                    color="red.500"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      deleteSession(session.id);
-                                    }}
-                                  >
-                                    Eliminar
-                                  </MenuItem>
-                                </MenuList>
-                              </Menu>
-                            </HStack>
-                            
-                            {currentSessionId === session.id && (
-                              <Badge colorScheme="purple" size="sm" mt={2}>
-                                Activo
-                              </Badge>
-                            )}
-                          </CardBody>
-                        </Card>
-                      ))}
-                    </VStack>
-                  )}
-                </CardBody>
-              </Card>
+        {/* Mobile Controls - Show toggle when needed */}
+        {isMobile && (
+          <Box
+            position="fixed"
+            top="50%"
+            left={4}
+            transform="translateY(-50%)"
+            zIndex={1000}
+          >
+            <VStack spacing={2}>
+              <IconButton
+                aria-label="Abrir chats"
+                icon={<FaBars />}
+                size="sm"
+                colorScheme="purple"
+                variant="solid"
+                onClick={onSidebarDrawerOpen}
+                shadow="md"
+                borderRadius="full"
+              />
+              <IconButton
+                aria-label="Nueva sesión"
+                icon={<FaPlus />}
+                size="sm"
+                colorScheme="green"
+                variant="solid"
+                onClick={onOpen}
+                shadow="md"
+                borderRadius="full"
+              />
             </VStack>
           </Box>
+        )}
 
-          {/* Chat Area */}
-          <VStack spacing={4} flex={1}>
-            {/* Current Session Header */}
-            {currentSession && (
-              <HStack w="full" justify="space-between" align="center">
-                <VStack align="start" spacing={0}>
-                  <Heading size="lg" color="purple.500">{currentSession.title}</Heading>
-                  <Text color="gray.600" fontSize="sm">
-                    Actualizado: {new Date(currentSession.updatedAt).toLocaleString('es-ES')}
+        {/* Mobile Sidebar Drawer */}
+        <Drawer isOpen={isSidebarDrawerOpen} placement="left" onClose={onSidebarDrawerClose}>
+          <DrawerOverlay />
+          <DrawerContent>
+            <DrawerHeader borderBottomWidth="1px">
+              <HStack justify="space-between">
+                <Heading size="md" color="purple.500">Chats</Heading>
+                <IconButton
+                  aria-label="Cerrar sidebar"
+                  icon={<FaTimes />}
+                  size="sm"
+                  variant="ghost"
+                  onClick={onSidebarDrawerClose}
+                />
+              </HStack>
+            </DrawerHeader>
+            <DrawerBody p={4}>
+              <SidebarContent />
+            </DrawerBody>
+          </DrawerContent>
+        </Drawer>
+
+        {/* Main Chat Area */}
+        <Flex direction="column" flex={1} h="calc(100vh - 80px)" position="relative">
+          {/* Header - Clean and Simple */}
+          {currentSession && (
+            <Box 
+              p={4} 
+              borderBottom="1px" 
+              borderColor="gray.200" 
+              bg="white"
+              zIndex={10}
+            >
+              <VStack align="center" spacing={0}>
+                <Heading size="md" color="purple.500" textAlign="center" noOfLines={1}>
+                  {currentSession.title}
+                </Heading>
+                <Text color="gray.600" fontSize="sm" textAlign="center">
+                  Actualizado: {new Date(currentSession.updatedAt).toLocaleString('es-ES')}
+                </Text>
+              </VStack>
+            </Box>
+          )}
+
+          {!currentSession ? (
+            /* No Session Selected */
+            <Flex flex={1} align="center" justify="center" direction="column" p={8}>
+              <VStack spacing={6} align="center" maxW="md" mx="auto">
+                <FaComments size={80} color="gray" />
+                <VStack spacing={2}>
+                  <Heading size="md" color="gray.500">
+                    {sidebarOpen && !isMobile ? 'Selecciona una sesión de chat' : 'Bienvenido al Agente IA'}
+                  </Heading>
+                  <Text color="gray.500" textAlign="center">
+                    {sidebarOpen && !isMobile 
+                      ? 'Elige una sesión existente del panel lateral o crea una nueva para comenzar.' 
+                      : 'Usa el panel lateral para ver tus chats o crear una nueva sesión.'
+                    }
                   </Text>
                 </VStack>
-              </HStack>
-            )}
-
-            {!currentSession ? (
-              <Card flex={1} w="full">
-                <CardBody>
-                  <VStack spacing={6} align="center" justify="center" h="400px">
-                    <FaComments size={80} color="gray" />
-                    <VStack spacing={2}>
-                      <Heading size="md" color="gray.500">
-                        Selecciona una sesión de chat
-                      </Heading>
-                      <Text color="gray.500" textAlign="center">
-                        Elige una sesión existente o crea una nueva para comenzar a chatear con el agente de IA.
-                      </Text>
-                    </VStack>
-                    <Button 
-                      colorScheme="purple" 
-                      leftIcon={<FaPlus />}
-                      onClick={onOpen}
-                    >
-                      Crear nueva sesión
-                    </Button>
-                  </VStack>
-                </CardBody>
-              </Card>
-            ) : (
-              /* Chat Container */
-              <Card bg={cardBg} flex={1} w="full">
-                <CardBody h="full" p={0}>
-                  <Flex direction="column" h="full">
-                    {/* Messages Area */}
-                    <Box flex={1} overflowY="auto" p={4}>
-                      <VStack spacing={4} align="stretch">
-                        {messages.map((msg) => (
-                          <HStack
-                            key={msg.id}
-                            align="start"
-                            justify={msg.type === 'user' ? 'flex-end' : 'flex-start'}
-                            spacing={3}
-                          >
-                            {msg.type === 'bot' && (
-                              <Avatar size="sm" bg="purple.500" icon={<FaRobot />} />
-                            )}
-                            
-                            <VStack align={msg.type === 'user' ? 'flex-end' : 'flex-start'} spacing={1}>
-                              {/* Tool usage indicator */}
-                              {msg.type === 'bot' && msg.toolsUsed && msg.toolsUsed.length > 0 && (
-                                <HStack spacing={1} fontSize="xs">
-                                  {msg.toolsUsed.map((tool, index) => (
-                                    <Badge key={index} size="sm" variant="subtle" colorScheme="purple">
-                                      🔧 {getToolDisplayName(tool)}
-                                    </Badge>
-                                  ))}
-                                </HStack>
-                              )}
-                              
-                              <Box
-                                maxW="70%"
-                                bg={msg.type === 'user' ? userMsgBg : botMsgBg}
-                                color={msg.type === 'user' ? 'white' : 'inherit'}
-                                px={4}
-                                py={3}
-                                borderRadius="lg"
-                                borderBottomLeftRadius={msg.type === 'bot' ? 'sm' : 'lg'}
-                                borderBottomRightRadius={msg.type === 'user' ? 'sm' : 'lg'}
-                              >
-                                {/* File info if present */}
-                                {msg.fileInfo && (
-                                  <VStack align="start" spacing={2} mb={2}>
-                                    <HStack spacing={2} p={2} bg={msg.type === 'user' ? 'whiteAlpha.200' : 'gray.100'} borderRadius="md">
-                                      <FaFile color={msg.type === 'user' ? 'white' : 'gray'} />
-                                      <VStack align="start" spacing={0}>
-                                        <Text fontSize="sm" fontWeight="medium">{msg.fileInfo.name}</Text>
-                                        <Text fontSize="xs" opacity={0.8}>
-                                          {(msg.fileInfo.size / 1024 / 1024).toFixed(2)} MB
-                                        </Text>
-                                      </VStack>
-                                    </HStack>
-                                  </VStack>
-                                )}
-                                {msg.type === 'bot' ? (
-                                  <MarkdownMessage 
-                                    content={msg.message} 
-                                    isDarkMode={useColorModeValue(false, true)} 
-                                  />
-                                ) : (
-                                  <Text>{msg.message}</Text>
-                                )}
-                                <Text
-                                  fontSize="xs"
-                                  color={msg.type === 'user' ? 'whiteAlpha.700' : 'gray.500'}
-                                  mt={1}
-                                >
-                                  {msg.timestamp.toLocaleTimeString('es-ES', { 
-                                    hour: '2-digit', 
-                                    minute: '2-digit' 
-                                  })}
-                                </Text>
-                              </Box>
-                            </VStack>
-
-                            {msg.type === 'user' && (
-                              <Avatar size="sm" bg="blue.500" icon={<FaUser />} />
-                            )}
-                          </HStack>
-                        ))}
-
-                        {isLoading && (
-                          <HStack align="start" spacing={3}>
-                            <Avatar size="sm" bg="purple.500" icon={<FaRobot />} />
-                            <Box
-                              bg={botMsgBg}
-                              px={4}
-                              py={3}
-                              borderRadius="lg"
-                              borderBottomLeftRadius="sm"
-                            >
-                              <Text>Escribiendo...</Text>
-                            </Box>
-                          </HStack>
+                {!sidebarOpen && !isMobile && (
+                  <Text fontSize="sm" color="gray.400" textAlign="center">
+                    💡 Tip: El panel lateral siempre está disponible en el lado izquierdo
+                  </Text>
+                )}
+              </VStack>
+            </Flex>
+          ) : (
+            /* Chat Container - Fixed Height Layout */
+            <Box 
+              flex={1} 
+              display="flex" 
+              flexDirection="column" 
+              overflow="hidden"
+              position="relative"
+            >
+              {/* Messages Area - Scrollable */}
+              <Box 
+                ref={messagesContainerRef}
+                flex={1} 
+                overflowY="auto" 
+                overflowX="hidden"
+                p={4} 
+                bg={cardBg}
+                  css={{
+                    '&::-webkit-scrollbar': {
+                      width: '6px',
+                    },
+                    '&::-webkit-scrollbar-track': {
+                      background: '#f1f1f1',
+                      borderRadius: '3px',
+                    },
+                    '&::-webkit-scrollbar-thumb': {
+                      background: '#c1c1c1',
+                      borderRadius: '3px',
+                    },
+                    '&::-webkit-scrollbar-thumb:hover': {
+                      background: '#a8a8a8',
+                    },
+                  }}
+                >
+                  <VStack spacing={4} align="stretch" pb={4}>
+                    {messages.map((msg) => (
+                      <HStack
+                        key={msg.id}
+                        align="start"
+                        justify={msg.type === 'user' ? 'flex-end' : 'flex-start'}
+                        spacing={3}
+                      >
+                        {msg.type === 'bot' && (
+                          <Avatar size="sm" bg="purple.500" icon={<FaRobot />} />
                         )}
-                      </VStack>
-                    </Box>
-
-                    <Divider />
-
-                    {/* Input Area */}
-                    <Box p={4}>
-                      <VStack spacing={3}>
-                        {/* File Upload Progress */}
-                        {isUploading && (
-                          <Box w="full">
-                            <Text fontSize="sm" mb={2}>
-                              {selectedFile ? 'Subiendo archivo...' : 
-                               selectedImages.length > 0 ? 'Subiendo imágenes...' : 
-                               'Subiendo...'}
-                            </Text>
-                            <Progress value={uploadProgress} colorScheme="purple" size="sm" />
-                          </Box>
-                        )}
-
-                        {/* Selected File Display */}
-                        {selectedFile && (
-                          <HStack w="full" p={3} bg="purple.50" borderRadius="md" spacing={3}>
-                            <FaFile color="purple" />
-                            <VStack align="start" spacing={0} flex={1}>
-                              <Text fontSize="sm" fontWeight="medium">{selectedFile.name}</Text>
-                              <Text fontSize="xs" color="gray.600">
-                                {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                              </Text>
-                            </VStack>
-                            <IconButton
-                              aria-label="Remover archivo"
-                              icon={<FaTimes />}
-                              size="sm"
-                              variant="ghost"
-                              onClick={removeSelectedFile}
-                            />
-                          </HStack>
-                        )}
-
-                        {/* Selected Images Display */}
-                        {selectedImages.length > 0 && (
-                          <VStack w="full" p={3} bg="blue.50" borderRadius="md" spacing={3}>
-                            <HStack w="full" justify="space-between">
-                              <Text fontSize="sm" fontWeight="medium">
-                                📸 {selectedImages.length} imagen(es) seleccionada(s)
-                              </Text>
-                              <IconButton
-                                aria-label="Remover todas las imágenes"
-                                icon={<FaTimes />}
-                                size="sm"
-                                variant="ghost"
-                                onClick={removeSelectedImages}
-                              />
+                        
+                        <VStack align={msg.type === 'user' ? 'flex-end' : 'flex-start'} spacing={1}>
+                          {/* Tool usage indicator */}
+                          {msg.type === 'bot' && msg.toolsUsed && msg.toolsUsed.length > 0 && (
+                            <HStack spacing={1} fontSize="xs">
+                              {msg.toolsUsed.map((tool, index) => (
+                                <Badge key={index} size="sm" variant="subtle" colorScheme="purple">
+                                  🔧 {getToolDisplayName(tool)}
+                                </Badge>
+                              ))}
                             </HStack>
-                            <VStack w="full" spacing={2} maxH="150px" overflowY="auto">
-                              {selectedImages.map((image, index) => (
-                                <HStack key={index} w="full" p={2} bg="white" borderRadius="md" spacing={3}>
-                                  <Box w="8px" h="8px" bg="blue.500" borderRadius="full" />
-                                  <VStack align="start" spacing={0} flex={1}>
-                                    <Text fontSize="xs" fontWeight="medium">{image.name}</Text>
-                                    <Text fontSize="xs" color="gray.600">
-                                      {(image.size / 1024 / 1024).toFixed(2)} MB
+                          )}
+                          
+                          <Box
+                            maxW={isMobile ? "85%" : "70%"}
+                            bg={msg.type === 'user' ? userMsgBg : botMsgBg}
+                            color={msg.type === 'user' ? 'white' : 'inherit'}
+                            px={4}
+                            py={3}
+                            borderRadius="lg"
+                            borderBottomLeftRadius={msg.type === 'bot' ? 'sm' : 'lg'}
+                            borderBottomRightRadius={msg.type === 'user' ? 'sm' : 'lg'}
+                          >
+                            {/* File info if present */}
+                            {msg.fileInfo && (
+                              <VStack align="start" spacing={2} mb={2}>
+                                <HStack spacing={2} p={2} bg={msg.type === 'user' ? 'whiteAlpha.200' : 'gray.100'} borderRadius="md">
+                                  <FaFile color={msg.type === 'user' ? 'white' : 'gray'} />
+                                  <VStack align="start" spacing={0}>
+                                    <Text fontSize="sm" fontWeight="medium">{msg.fileInfo.name}</Text>
+                                    <Text fontSize="xs" opacity={0.8}>
+                                      {(msg.fileInfo.size / 1024 / 1024).toFixed(2)} MB
                                     </Text>
                                   </VStack>
-                                  <IconButton
-                                    aria-label="Remover imagen"
-                                    icon={<FaTimes />}
-                                    size="xs"
-                                    variant="ghost"
-                                    onClick={() => removeSelectedImage(index)}
-                                  />
                                 </HStack>
-                              ))}
-                            </VStack>
-                          </VStack>
+                              </VStack>
+                            )}
+                            {msg.type === 'bot' ? (
+                              <MarkdownMessage 
+                                content={msg.message} 
+                                isDarkMode={useColorModeValue(false, true)} 
+                              />
+                            ) : (
+                              <Text>{msg.message}</Text>
+                            )}
+                            <Text
+                              fontSize="xs"
+                              color={msg.type === 'user' ? 'whiteAlpha.700' : 'gray.500'}
+                              mt={1}
+                            >
+                              {msg.timestamp.toLocaleTimeString('es-ES', { 
+                                hour: '2-digit', 
+                                minute: '2-digit' 
+                              })}
+                            </Text>
+                          </Box>
+                        </VStack>
+
+                        {msg.type === 'user' && (
+                          <Avatar size="sm" bg="blue.500" icon={<FaUser />} />
                         )}
+                      </HStack>
+                    ))}
 
+                    {isLoading && (
+                      <HStack align="start" spacing={3}>
+                        <Avatar size="sm" bg="purple.500" icon={<FaRobot />} />
+                        <Box
+                          bg={botMsgBg}
+                          px={4}
+                          py={3}
+                          borderRadius="lg"
+                          borderBottomLeftRadius="sm"
+                        >
+                          <Text>Escribiendo...</Text>
+                        </Box>
+                      </HStack>
+                    )}
 
-                        {/* Message Input */}
-                        <HStack spacing={2} w="full">
-                          <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept=".pdf,.xlsx,.xls,.csv,image/*"
-                            style={{ display: 'none' }}
-                            onChange={handleFileSelect}
-                          />
-                          <input
-                            ref={imageInputRef}
-                            type="file"
-                            accept="image/*"
-                            multiple
-                            style={{ display: 'none' }}
-                            onChange={handleImageSelect}
-                          />
+                  </VStack>
+                </Box>
+
+                {/* Input Area - Fixed at Bottom */}
+                <Box 
+                  flexShrink={0}
+                  w="100%"
+                  bg="white" 
+                  borderTop="1px" 
+                  borderColor="gray.200" 
+                  p={4}
+                  zIndex={10}
+                >
+                  <VStack spacing={3} w="full" maxW="none">
+                    {/* File Upload Progress */}
+                    {isUploading && (
+                      <Box w="full">
+                        <Text fontSize="sm" mb={2}>
+                          {selectedFile ? 'Subiendo archivo...' : 
+                           selectedImages.length > 0 ? 'Subiendo imágenes...' : 
+                           'Subiendo...'}
+                        </Text>
+                        <Progress value={uploadProgress} colorScheme="purple" size="sm" />
+                      </Box>
+                    )}
+
+                    {/* Selected File Display */}
+                    {selectedFile && (
+                      <HStack w="full" p={3} bg="purple.50" borderRadius="md" spacing={3}>
+                        <FaFile color="purple" />
+                        <VStack align="start" spacing={0} flex={1}>
+                          <Text fontSize="sm" fontWeight="medium">{selectedFile.name}</Text>
+                          <Text fontSize="xs" color="gray.600">
+                            {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                          </Text>
+                        </VStack>
+                        <IconButton
+                          aria-label="Remover archivo"
+                          icon={<FaTimes />}
+                          size="sm"
+                          variant="ghost"
+                          onClick={removeSelectedFile}
+                        />
+                      </HStack>
+                    )}
+
+                    {/* Selected Images Display */}
+                    {selectedImages.length > 0 && (
+                      <VStack w="full" p={3} bg="blue.50" borderRadius="md" spacing={3}>
+                        <HStack w="full" justify="space-between">
+                          <Text fontSize="sm" fontWeight="medium">
+                            📸 {selectedImages.length} imagen(es) seleccionada(s)
+                          </Text>
                           <IconButton
-                            aria-label="Subir archivo"
-                            icon={selectedFile ? <FaUpload /> : <FaFile />}
-                            variant="outline"
-                            colorScheme={selectedFile ? 'purple' : 'gray'}
-                            onClick={handleFileUpload}
-                          />
-                          <IconButton
-                            aria-label="Subir imágenes"
-                            icon={selectedImages.length > 0 ? <FaUpload /> : <FaImage />}
-                            variant="outline"
-                            colorScheme={selectedImages.length > 0 ? 'blue' : 'gray'}
-                            onClick={handleImageUpload}
-                          />
-                          <Input
-                            placeholder={
-                              selectedFile ? "Escribe un mensaje opcional sobre el archivo..." :
-                              selectedImages.length > 0 ? "Escribe un mensaje opcional sobre las imágenes..." :
-                              "Escribe tu mensaje aquí... (Presiona Enter para enviar)"
-                            }
-                            value={message}
-                            onChange={(e) => setMessage(e.target.value)}
-                            onKeyPress={handleKeyPress}
-                            flex={1}
-                            isDisabled={!currentSessionId || isUploading}
-                          />
-                          <IconButton
-                            aria-label="Enviar mensaje"
-                            icon={<FaPaperPlane />}
-                            colorScheme="purple"
-                            onClick={handleSendMessage}
-                            isDisabled={(!message.trim() && !selectedFile && selectedImages.length === 0) || isLoading || !currentSessionId || isUploading}
-                            isLoading={isLoading || isUploading}
+                            aria-label="Remover todas las imágenes"
+                            icon={<FaTimes />}
+                            size="sm"
+                            variant="ghost"
+                            onClick={removeSelectedImages}
                           />
                         </HStack>
+                        <VStack w="full" spacing={2} maxH="150px" overflowY="auto">
+                          {selectedImages.map((image, index) => (
+                            <HStack key={index} w="full" p={2} bg="white" borderRadius="md" spacing={3}>
+                              <Box w="8px" h="8px" bg="blue.500" borderRadius="full" />
+                              <VStack align="start" spacing={0} flex={1}>
+                                <Text fontSize="xs" fontWeight="medium">{image.name}</Text>
+                                <Text fontSize="xs" color="gray.600">
+                                  {(image.size / 1024 / 1024).toFixed(2)} MB
+                                </Text>
+                              </VStack>
+                              <IconButton
+                                aria-label="Remover imagen"
+                                icon={<FaTimes />}
+                                size="xs"
+                                variant="ghost"
+                                onClick={() => removeSelectedImage(index)}
+                              />
+                            </HStack>
+                          ))}
+                        </VStack>
                       </VStack>
-                    </Box>
-                  </Flex>
-                </CardBody>
-              </Card>
-            )}
+                    )}
 
-            {/* Helper Text */}
-            <Text fontSize="sm" color="gray.500" textAlign="center">
+                    {/* Message Input - Full Width */}
+                    <HStack spacing={2} w="full" maxW="none">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".pdf,.xlsx,.xls,.csv,image/*"
+                        style={{ display: 'none' }}
+                        onChange={handleFileSelect}
+                      />
+                      <input
+                        ref={imageInputRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        style={{ display: 'none' }}
+                        onChange={handleImageSelect}
+                      />
+                      <IconButton
+                        aria-label="Subir archivo"
+                        icon={selectedFile ? <FaUpload /> : <FaFile />}
+                        variant="outline"
+                        colorScheme={selectedFile ? 'purple' : 'gray'}
+                        onClick={handleFileUpload}
+                        size={isMobile ? "sm" : "md"}
+                      />
+                      <IconButton
+                        aria-label="Subir imágenes"
+                        icon={selectedImages.length > 0 ? <FaUpload /> : <FaImage />}
+                        variant="outline"
+                        colorScheme={selectedImages.length > 0 ? 'blue' : 'gray'}
+                        onClick={handleImageUpload}
+                        size={isMobile ? "sm" : "md"}
+                      />
+                      <Input
+                        placeholder={
+                          selectedFile ? "Escribe un mensaje opcional sobre el archivo..." :
+                          selectedImages.length > 0 ? "Escribe un mensaje opcional sobre las imágenes..." :
+                          "Escribe tu mensaje aquí..."
+                        }
+                        value={message}
+                        onChange={(e) => setMessage(e.target.value)}
+                        onKeyPress={handleKeyPress}
+                        flex={1}
+                        isDisabled={!currentSessionId || isUploading}
+                        size={isMobile ? "sm" : "md"}
+                      />
+                      <IconButton
+                        aria-label="Enviar mensaje"
+                        icon={<FaPaperPlane />}
+                        colorScheme="purple"
+                        onClick={handleSendMessage}
+                        isDisabled={(!message.trim() && !selectedFile && selectedImages.length === 0) || isLoading || !currentSessionId || isUploading}
+                        isLoading={isLoading || isUploading}
+                        size={isMobile ? "sm" : "md"}
+                      />
+                    </HStack>
+                  </VStack>
+                </Box>
+            </Box>
+          )}
+        </Flex>
+
+        {/* Helper Text - Only show when no session */}
+        {!currentSession && (
+          <Box 
+            position="absolute" 
+            bottom={4} 
+            left={!isMobile ? (sidebarOpen ? sidebarWidth : "80px") : "4"} 
+            right={4} 
+            textAlign="center"
+            px={4}
+            zIndex={5}
+            transition="left 0.3s ease"
+          >
+            <Text fontSize="sm" color="gray.500">
               El agente puede analizar archivos, extraer transacciones, crear reglas automáticas, 
               consultar datos y ayudarte con la gestión financiera de tu familia.
             </Text>
-          </VStack>
-        </Flex>
-      </Container>
+          </Box>
+        )}
+      </Flex>
 
       {/* New Session Modal */}
       <Drawer isOpen={isOpen} placement="right" onClose={onClose}>
