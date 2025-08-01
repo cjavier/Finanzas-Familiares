@@ -331,6 +331,13 @@ export const insertTransactionSchema = createInsertSchema(transactions).omit({
   updatedAt: true,
   teamId: true,
   userId: true,
+}).extend({
+  amount: z.string().refine((val) => {
+    const num = parseFloat(val);
+    return !isNaN(num) && num > 0;
+  }, {
+    message: "Amount must be a positive number",
+  }),
 });
 
 export const insertRuleSchema = createInsertSchema(rules).omit({

@@ -30,8 +30,10 @@ import {
   Progress,
 } from '@chakra-ui/react';
 import { useState, useEffect, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import Navigation from '@/components/navigation';
-import { FaPaperPlane, FaFile, FaRobot, FaUser, FaPlus, FaEllipsisV, FaEdit, FaTrash, FaComments, FaUpload, FaTimes } from 'react-icons/fa';
+import { FaPaperPlane, FaFile, FaRobot, FaUser, FaPlus, FaEllipsisV, FaEdit, FaTrash, FaComments, FaUpload, FaTimes, FaImage } from 'react-icons/fa';
 
 interface ChatSession {
   id: string;
@@ -79,6 +81,103 @@ const getToolDisplayName = (toolName: string): string => {
   return toolNames[toolName] || toolName;
 };
 
+const MarkdownMessage = ({ content, isDarkMode }: { content: string; isDarkMode?: boolean }) => {
+  return (
+    <Box
+      sx={{
+        '& p': {
+          margin: '0.5em 0',
+          lineHeight: '1.6',
+        },
+        '& p:first-of-type': {
+          marginTop: 0,
+        },
+        '& p:last-child': {
+          marginBottom: 0,
+        },
+        '& h1, & h2, & h3, & h4, & h5, & h6': {
+          margin: '1em 0 0.5em 0',
+          fontWeight: 'bold',
+        },
+        '& h1:first-child, & h2:first-child, & h3:first-child': {
+          marginTop: 0,
+        },
+        '& ul, & ol': {
+          margin: '0.5em 0',
+          paddingLeft: '1.5em',
+        },
+        '& li': {
+          margin: '0.25em 0',
+        },
+        '& code': {
+          background: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+          padding: '0.2em 0.4em',
+          borderRadius: '3px',
+          fontSize: '0.9em',
+          fontFamily: 'monospace',
+        },
+        '& pre': {
+          background: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+          padding: '1em',
+          borderRadius: '6px',
+          overflow: 'auto',
+          margin: '0.5em 0',
+        },
+        '& pre code': {
+          background: 'transparent',
+          padding: 0,
+        },
+        '& blockquote': {
+          borderLeft: '4px solid',
+          borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.3)',
+          paddingLeft: '1em',
+          margin: '0.5em 0',
+          fontStyle: 'italic',
+        },
+        '& table': {
+          width: '100%',
+          borderCollapse: 'collapse',
+          margin: '0.5em 0',
+          fontSize: '0.9em',
+        },
+        '& th, & td': {
+          border: '1px solid',
+          borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)',
+          padding: '0.5em 0.75em',
+          textAlign: 'left',
+        },
+        '& th': {
+          background: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
+          fontWeight: 'bold',
+        },
+        '& tr:nth-of-type(even) td': {
+          background: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.02)',
+        },
+        '& a': {
+          color: isDarkMode ? '#90cdf4' : '#3182ce',
+          textDecoration: 'underline',
+        },
+        '& hr': {
+          border: 'none',
+          borderTop: '1px solid',
+          borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)',
+          margin: '1em 0',
+        },
+        '& strong': {
+          fontWeight: 'bold',
+        },
+        '& em': {
+          fontStyle: 'italic',
+        },
+      }}
+    >
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        {content}
+      </ReactMarkdown>
+    </Box>
+  );
+};
+
 export default function AgentePage() {
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -90,11 +189,13 @@ export default function AgentePage() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedImages, setSelectedImages] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
 
   const { isOpen, onOpen, onClose } = useDisclosure();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
 
   useEffect(() => {
@@ -333,6 +434,11 @@ export default function AgentePage() {
       return;
     }
     
+    if (selectedImages.length > 0) {
+      await uploadImagesAndSendMessage();
+      return;
+    }
+    
     if (!message.trim() || !currentSessionId) return;
 
     const newUserMessage: ChatMessage = {
@@ -445,11 +551,79 @@ export default function AgentePage() {
     }
   };
 
+  const handleImageSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length > 0) {
+      // Check file types
+      const allowedTypes = [
+        'image/jpeg',
+        'image/png',
+        'image/gif',
+        'image/webp',
+        'image/bmp'
+      ];
+      
+      const invalidFiles = files.filter(file => !allowedTypes.includes(file.type));
+      if (invalidFiles.length > 0) {
+        toast({
+          title: 'Tipo de archivo no compatible',
+          description: 'Solo se permiten imágenes (JPG, PNG, GIF, WebP, BMP)',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        });
+        return;
+      }
+      
+      // Check file sizes (max 10MB each)
+      const oversizedFiles = files.filter(file => file.size > 10 * 1024 * 1024);
+      if (oversizedFiles.length > 0) {
+        toast({
+          title: 'Archivos demasiado grandes',
+          description: 'Cada imagen no puede superar los 10MB',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        });
+        return;
+      }
+
+      // Check maximum number of files (5)
+      if (files.length > 5) {
+        toast({
+          title: 'Demasiadas imágenes',
+          description: 'Puedes subir máximo 5 imágenes a la vez',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        });
+        return;
+      }
+      
+      setSelectedImages(files);
+    }
+  };
+
   const removeSelectedFile = () => {
     setSelectedFile(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+  };
+
+  const removeSelectedImages = () => {
+    setSelectedImages([]);
+    if (imageInputRef.current) {
+      imageInputRef.current.value = '';
+    }
+  };
+
+  const removeSelectedImage = (index: number) => {
+    setSelectedImages(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleImageUpload = () => {
+    imageInputRef.current?.click();
   };
 
   const uploadFileAndSendMessage = async () => {
@@ -533,6 +707,93 @@ export default function AgentePage() {
       setSelectedFile(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const uploadImagesAndSendMessage = async () => {
+    if (selectedImages.length === 0 || !currentSessionId) return;
+
+    setIsUploading(true);
+    setUploadProgress(0);
+
+    try {
+      const formData = new FormData();
+      selectedImages.forEach((image, index) => {
+        formData.append('images', image);
+      });
+      formData.append('sessionId', currentSessionId);
+      formData.append('message', message.trim() || `He subido ${selectedImages.length} imagen(es)`);
+
+      // Add user message with images info
+      const userMessage: ChatMessage = {
+        id: Date.now().toString(),
+        type: 'user',
+        message: message.trim() || `He subido ${selectedImages.length} imagen(es)`,
+        timestamp: new Date(),
+        fileInfo: {
+          name: `${selectedImages.length} imagen(es)`,
+          size: selectedImages.reduce((total, img) => total + img.size, 0),
+          type: 'images'
+        }
+      };
+
+      setMessages(prev => [...prev, userMessage]);
+      setMessage('');
+      
+      // Simulate upload progress
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => {
+          if (prev >= 90) {
+            clearInterval(progressInterval);
+            return 90;
+          }
+          return prev + 10;
+        });
+      }, 200);
+
+      const response = await fetch('/api/agent/chat-with-images', {
+        method: 'POST',
+        body: formData,
+      });
+
+      clearInterval(progressInterval);
+      setUploadProgress(100);
+
+      if (response.ok) {
+        const data = await response.json();
+        const botResponse: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          type: 'bot',
+          message: data.response,
+          timestamp: new Date(),
+          toolsUsed: data.toolsUsed || []
+        };
+        setMessages(prev => [...prev, botResponse]);
+      } else {
+        const errorResponse: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          type: 'bot',
+          message: 'Lo siento, hubo un error al procesar las imágenes. Por favor, inténtalo de nuevo.',
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, errorResponse]);
+      }
+    } catch (error) {
+      console.error('Error uploading images:', error);
+      const errorResponse: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        type: 'bot',
+        message: 'Lo siento, no pude procesar las imágenes. Verifica tu conexión e inténtalo de nuevo.',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorResponse]);
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(0);
+      setSelectedImages([]);
+      if (imageInputRef.current) {
+        imageInputRef.current.value = '';
       }
     }
   };
@@ -790,7 +1051,14 @@ export default function AgentePage() {
                                     </HStack>
                                   </VStack>
                                 )}
-                                <Text>{msg.message}</Text>
+                                {msg.type === 'bot' ? (
+                                  <MarkdownMessage 
+                                    content={msg.message} 
+                                    isDarkMode={useColorModeValue(false, true)} 
+                                  />
+                                ) : (
+                                  <Text>{msg.message}</Text>
+                                )}
                                 <Text
                                   fontSize="xs"
                                   color={msg.type === 'user' ? 'whiteAlpha.700' : 'gray.500'}
@@ -835,7 +1103,11 @@ export default function AgentePage() {
                         {/* File Upload Progress */}
                         {isUploading && (
                           <Box w="full">
-                            <Text fontSize="sm" mb={2}>Subiendo archivo...</Text>
+                            <Text fontSize="sm" mb={2}>
+                              {selectedFile ? 'Subiendo archivo...' : 
+                               selectedImages.length > 0 ? 'Subiendo imágenes...' : 
+                               'Subiendo...'}
+                            </Text>
                             <Progress value={uploadProgress} colorScheme="purple" size="sm" />
                           </Box>
                         )}
@@ -860,24 +1132,44 @@ export default function AgentePage() {
                           </HStack>
                         )}
 
-                        {/* Quick Actions */}
-                        <HStack spacing={2} w="full" overflowX="auto">
-                          <Button size="sm" variant="outline" onClick={handleFileUpload}>
-                            📎 Subir archivo
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleQuickAction('analyze')}>
-                            📊 Analizar gastos
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleQuickAction('categorize')}>
-                            🏷️ Categorizar transacciones
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleQuickAction('rules')}>
-                            📋 Crear regla
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleQuickAction('budget')}>
-                            💰 Revisar presupuestos
-                          </Button>
-                        </HStack>
+                        {/* Selected Images Display */}
+                        {selectedImages.length > 0 && (
+                          <VStack w="full" p={3} bg="blue.50" borderRadius="md" spacing={3}>
+                            <HStack w="full" justify="space-between">
+                              <Text fontSize="sm" fontWeight="medium">
+                                📸 {selectedImages.length} imagen(es) seleccionada(s)
+                              </Text>
+                              <IconButton
+                                aria-label="Remover todas las imágenes"
+                                icon={<FaTimes />}
+                                size="sm"
+                                variant="ghost"
+                                onClick={removeSelectedImages}
+                              />
+                            </HStack>
+                            <VStack w="full" spacing={2} maxH="150px" overflowY="auto">
+                              {selectedImages.map((image, index) => (
+                                <HStack key={index} w="full" p={2} bg="white" borderRadius="md" spacing={3}>
+                                  <Box w="8px" h="8px" bg="blue.500" borderRadius="full" />
+                                  <VStack align="start" spacing={0} flex={1}>
+                                    <Text fontSize="xs" fontWeight="medium">{image.name}</Text>
+                                    <Text fontSize="xs" color="gray.600">
+                                      {(image.size / 1024 / 1024).toFixed(2)} MB
+                                    </Text>
+                                  </VStack>
+                                  <IconButton
+                                    aria-label="Remover imagen"
+                                    icon={<FaTimes />}
+                                    size="xs"
+                                    variant="ghost"
+                                    onClick={() => removeSelectedImage(index)}
+                                  />
+                                </HStack>
+                              ))}
+                            </VStack>
+                          </VStack>
+                        )}
+
 
                         {/* Message Input */}
                         <HStack spacing={2} w="full">
@@ -888,6 +1180,14 @@ export default function AgentePage() {
                             style={{ display: 'none' }}
                             onChange={handleFileSelect}
                           />
+                          <input
+                            ref={imageInputRef}
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            style={{ display: 'none' }}
+                            onChange={handleImageSelect}
+                          />
                           <IconButton
                             aria-label="Subir archivo"
                             icon={selectedFile ? <FaUpload /> : <FaFile />}
@@ -895,8 +1195,19 @@ export default function AgentePage() {
                             colorScheme={selectedFile ? 'purple' : 'gray'}
                             onClick={handleFileUpload}
                           />
+                          <IconButton
+                            aria-label="Subir imágenes"
+                            icon={selectedImages.length > 0 ? <FaUpload /> : <FaImage />}
+                            variant="outline"
+                            colorScheme={selectedImages.length > 0 ? 'blue' : 'gray'}
+                            onClick={handleImageUpload}
+                          />
                           <Input
-                            placeholder={selectedFile ? "Escribe un mensaje opcional sobre el archivo..." : "Escribe tu mensaje aquí... (Presiona Enter para enviar)"}
+                            placeholder={
+                              selectedFile ? "Escribe un mensaje opcional sobre el archivo..." :
+                              selectedImages.length > 0 ? "Escribe un mensaje opcional sobre las imágenes..." :
+                              "Escribe tu mensaje aquí... (Presiona Enter para enviar)"
+                            }
                             value={message}
                             onChange={(e) => setMessage(e.target.value)}
                             onKeyPress={handleKeyPress}
@@ -908,7 +1219,7 @@ export default function AgentePage() {
                             icon={<FaPaperPlane />}
                             colorScheme="purple"
                             onClick={handleSendMessage}
-                            isDisabled={(!message.trim() && !selectedFile) || isLoading || !currentSessionId || isUploading}
+                            isDisabled={(!message.trim() && !selectedFile && selectedImages.length === 0) || isLoading || !currentSessionId || isUploading}
                             isLoading={isLoading || isUploading}
                           />
                         </HStack>

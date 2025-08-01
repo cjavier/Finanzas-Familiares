@@ -40,8 +40,15 @@ import {
   NumberInput,
   NumberInputField,
   useDisclosure,
+  Checkbox,
+  AlertDialog,
+  AlertDialogBody,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogContent,
+  AlertDialogOverlay,
 } from '@chakra-ui/react';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useLocation } from 'wouter';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import Navigation from '@/components/navigation';
@@ -78,6 +85,15 @@ export default function TransactionsPage() {
   const [editDescription, setEditDescription] = useState('');
   const [editCategoryId, setEditCategoryId] = useState('');
   const [editDate, setEditDate] = useState('');
+
+  // Batch selection states
+  const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
+  const { 
+    isOpen: isDeleteDialogOpen, 
+    onOpen: onDeleteDialogOpen, 
+    onClose: onDeleteDialogClose 
+  } = useDisclosure();
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   // Build query parameters for API call
   const queryParams = useMemo(() => {
@@ -176,8 +192,33 @@ export default function TransactionsPage() {
     },
   });
 
+  // Batch delete mutation
+  const batchDeleteMutation = useMutation({
+    mutationFn: async (transactionIds: string[]) => {
+      const res = await apiRequest('DELETE', '/api/transactions/batch', { transactionIds });
+      return await res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/budgets/analytics'] });
+      setSelectedTransactions(new Set());
+      toast({
+        title: "Transacciones eliminadas",
+        description: `Se eliminaron ${data.deleted} de ${data.total} transacciones${data.errors.length > 0 ? `. Algunos errores: ${data.errors.slice(0, 2).join(', ')}` : ''}.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: "No se pudieron eliminar las transacciones.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleOpenEdit = (transaction: Transaction) => {
     setEditingTransaction(transaction);
+    // Show the absolute value in the input field since all are expenses
     setEditAmount(Math.abs(parseFloat(transaction.amount)).toString());
     setEditDescription(transaction.description);
     setEditCategoryId(transaction.categoryId);
@@ -195,8 +236,12 @@ export default function TransactionsPage() {
       return;
     }
 
+    // Ensure amount is positive since all are stored as positive costs
+    const numericAmount = parseFloat(editAmount);
+    const finalAmount = Math.abs(numericAmount).toString();
+
     const data = {
-      amount: editAmount,
+      amount: finalAmount,
       description: editDescription,
       categoryId: editCategoryId,
       date: editDate,
@@ -210,8 +255,9 @@ export default function TransactionsPage() {
     return category ? `${category.icon || '💰'} ${category.name}` : 'Sin categoría';
   };
 
-  const getAmountColor = (amount: string) => {
-    return parseFloat(amount) >= 0 ? 'green.500' : 'red.500';
+  const getAmountColor = () => {
+    // Always red since we only track expenses
+    return 'red.500';
   };
 
   const getStatusColor = (status: string) => {
@@ -225,8 +271,43 @@ export default function TransactionsPage() {
 
   const formatAmount = (amount: string) => {
     const num = parseFloat(amount);
-    return `${num >= 0 ? '+' : ''}$${Math.abs(num).toLocaleString()}`;
+    // Always show as expense amount (positive display value)
+    return `$${Math.abs(num).toLocaleString()}`;
   };
+
+  // Batch selection functions
+  const handleSelectTransaction = (transactionId: string, checked: boolean) => {
+    const newSelected = new Set(selectedTransactions);
+    if (checked) {
+      newSelected.add(transactionId);
+    } else {
+      newSelected.delete(transactionId);
+    }
+    setSelectedTransactions(newSelected);
+  };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      const allIds = new Set(transactions.map(t => t.id));
+      setSelectedTransactions(allIds);
+    } else {
+      setSelectedTransactions(new Set());
+    }
+  };
+
+  const handleBatchDelete = () => {
+    if (selectedTransactions.size === 0) return;
+    onDeleteDialogOpen();
+  };
+
+  const confirmBatchDelete = () => {
+    const transactionIds = Array.from(selectedTransactions);
+    batchDeleteMutation.mutate(transactionIds);
+    onDeleteDialogClose();
+  };
+
+  const isAllSelected = transactions.length > 0 && selectedTransactions.size === transactions.length;
+  const isIndeterminate = selectedTransactions.size > 0 && selectedTransactions.size < transactions.length;
 
   if (isLoadingTransactions) {
     return (
@@ -251,17 +332,35 @@ export default function TransactionsPage() {
           {/* Header */}
           <HStack justify="space-between" align="center">
             <VStack align="start" spacing={1}>
-              <Heading size="lg">Transacciones</Heading>
-              <Text color="gray.600">Gestiona y visualiza todas las transacciones del equipo</Text>
+              <Heading size="lg">Gastos</Heading>
+              <Text color="gray.600">Gestiona y visualiza todos los gastos del equipo</Text>
+              {selectedTransactions.size > 0 && (
+                <Text fontSize="sm" color="blue.600">
+                  {selectedTransactions.size} transacción{selectedTransactions.size !== 1 ? 'es' : ''} seleccionada{selectedTransactions.size !== 1 ? 's' : ''}
+                </Text>
+              )}
             </VStack>
             
-            <Button
-              leftIcon={<FaPlus />}
-              colorScheme="blue"
-              onClick={() => navigate('/transactions/add')}
-            >
-              Nueva Transacción
-            </Button>
+            <HStack spacing={3}>
+              {selectedTransactions.size > 0 && (
+                <Button
+                  leftIcon={<FaTrash />}
+                  colorScheme="red"
+                  variant="outline"
+                  onClick={handleBatchDelete}
+                  isLoading={batchDeleteMutation.isPending}
+                >
+                  Eliminar ({selectedTransactions.size})
+                </Button>
+              )}
+              <Button
+                leftIcon={<FaPlus />}
+                colorScheme="blue"
+                onClick={() => navigate('/transactions/add')}
+              >
+                Nuevo Gasto
+              </Button>
+            </HStack>
           </HStack>
 
           {/* Filters */}
@@ -336,20 +435,28 @@ export default function TransactionsPage() {
               {transactions.length === 0 ? (
                 <VStack spacing={4} py={8}>
                   <Text fontSize="lg" color="gray.500">
-                    No se encontraron transacciones
+                    No se encontraron gastos
                   </Text>
                   <Button
                     leftIcon={<FaPlus />}
                     colorScheme="blue"
                     onClick={() => navigate('/transactions/add')}
                   >
-                    Crear primera transacción
+                    Crear primer gasto
                   </Button>
                 </VStack>
               ) : (
                 <Table variant="simple">
                   <Thead>
                     <Tr>
+                      <Th width="50px">
+                        <Checkbox
+                          isChecked={isAllSelected}
+                          isIndeterminate={isIndeterminate}
+                          onChange={(e) => handleSelectAll(e.target.checked)}
+                          aria-label="Seleccionar todas las transacciones"
+                        />
+                      </Th>
                       <Th>Descripción</Th>
                       <Th>Categoría</Th>
                       <Th>Monto</Th>
@@ -361,6 +468,13 @@ export default function TransactionsPage() {
                   <Tbody>
                     {transactions.map((transaction) => (
                       <Tr key={transaction.id}>
+                        <Td>
+                          <Checkbox
+                            isChecked={selectedTransactions.has(transaction.id)}
+                            onChange={(e) => handleSelectTransaction(transaction.id, e.target.checked)}
+                            aria-label={`Seleccionar transacción ${transaction.description}`}
+                          />
+                        </Td>
                         <Td>
                           <VStack align="start" spacing={1}>
                             <Text fontWeight="medium">{transaction.description}</Text>
@@ -378,7 +492,7 @@ export default function TransactionsPage() {
                         <Td>
                           <Text
                             fontWeight="bold"
-                            color={getAmountColor(transaction.amount)}
+                            color={getAmountColor()}
                           >
                             {formatAmount(transaction.amount)}
                           </Text>
@@ -452,7 +566,7 @@ export default function TransactionsPage() {
       <Modal isOpen={isOpen} onClose={onClose} size="lg">
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>Editar Transacción</ModalHeader>
+          <ModalHeader>Editar Gasto</ModalHeader>
           <ModalCloseButton />
           <ModalBody>
             <VStack spacing={4}>
@@ -466,7 +580,7 @@ export default function TransactionsPage() {
               </FormControl>
 
               <FormControl isRequired>
-                <FormLabel>Monto</FormLabel>
+                <FormLabel>Monto del Gasto</FormLabel>
                 <NumberInput
                   value={editAmount}
                   onChange={(value) => setEditAmount(value)}
@@ -475,6 +589,9 @@ export default function TransactionsPage() {
                 >
                   <NumberInputField placeholder="0.00" />
                 </NumberInput>
+                <Text fontSize="sm" color="gray.500" mt={1}>
+                  Ingresa el monto del gasto. Se registrará automáticamente como egreso.
+                </Text>
               </FormControl>
 
               <FormControl isRequired>
@@ -517,6 +634,40 @@ export default function TransactionsPage() {
           </ModalFooter>
         </ModalContent>
       </Modal>
+
+      {/* Batch Delete Confirmation Dialog */}
+      <AlertDialog
+        isOpen={isDeleteDialogOpen}
+        leastDestructiveRef={cancelRef}
+        onClose={onDeleteDialogClose}
+      >
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader fontSize="lg" fontWeight="bold">
+              Confirmar eliminación
+            </AlertDialogHeader>
+
+            <AlertDialogBody>
+              ¿Estás seguro de que quieres eliminar {selectedTransactions.size} transacción{selectedTransactions.size !== 1 ? 'es' : ''}? 
+              Esta acción no se puede deshacer.
+            </AlertDialogBody>
+
+            <AlertDialogFooter>
+              <Button ref={cancelRef} onClick={onDeleteDialogClose}>
+                Cancelar
+              </Button>
+              <Button
+                colorScheme="red"
+                onClick={confirmBatchDelete}
+                ml={3}
+                isLoading={batchDeleteMutation.isPending}
+              >
+                Eliminar
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
     </Box>
   );
 }

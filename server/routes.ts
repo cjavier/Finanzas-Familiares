@@ -4,6 +4,7 @@ import { setupAuth } from "./auth";
 import { storage } from "./storage";
 import { checkDatabaseConnection } from "./db";
 import { insertTransactionSchema, insertCategorySchema, insertBudgetSchema, insertRuleSchema, insertFileSchema } from "@shared/schema";
+import { z } from "zod";
 import multer from "multer";
 import path from "path";
 import fs from "fs/promises";
@@ -311,7 +312,15 @@ export function registerRoutes(app: Express): Server {
 
     try {
       const user = req.user!;
-      const validatedData = insertTransactionSchema.parse(req.body);
+      
+      // Ensure amount is always positive for cost tracking
+      const requestData = { ...req.body };
+      if (requestData.amount) {
+        const numAmount = parseFloat(requestData.amount);
+        requestData.amount = Math.abs(numAmount).toString();
+      }
+      
+      const validatedData = insertTransactionSchema.parse(requestData);
       
       const transaction = await storage.createTransaction({
         ...validatedData,
@@ -322,6 +331,9 @@ export function registerRoutes(app: Express): Server {
       res.status(201).json(transaction);
     } catch (error) {
       console.error("Error creating transaction:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid input", errors: error.errors });
+      }
       res.status(500).json({ message: "Failed to create transaction" });
     }
   });
@@ -335,7 +347,15 @@ export function registerRoutes(app: Express): Server {
     try {
       const user = req.user!;
       const transactionId = req.params.id;
-      const validatedData = insertTransactionSchema.partial().parse(req.body);
+      
+      // Ensure amount is always positive for cost tracking
+      const requestData = { ...req.body };
+      if (requestData.amount) {
+        const numAmount = parseFloat(requestData.amount);
+        requestData.amount = Math.abs(numAmount).toString();
+      }
+      
+      const validatedData = insertTransactionSchema.partial().parse(requestData);
       
       // Verify transaction belongs to user's team
       const existingTransaction = await storage.getTransaction(transactionId, user.teamId);
@@ -356,6 +376,55 @@ export function registerRoutes(app: Express): Server {
     } catch (error) {
       console.error("Error updating transaction:", error);
       res.status(500).json({ message: "Failed to update transaction" });
+    }
+  });
+
+  // Delete multiple transactions (DEBE IR ANTES que la ruta :id)
+  app.delete("/api/transactions/batch", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const user = req.user!;
+      const { transactionIds } = req.body;
+
+      if (!Array.isArray(transactionIds) || transactionIds.length === 0) {
+        return res.status(400).json({ message: "Transaction IDs array is required" });
+      }
+
+      if (transactionIds.length > 100) {
+        return res.status(400).json({ message: "Cannot delete more than 100 transactions at once" });
+      }
+
+      const results = {
+        deleted: 0,
+        errors: [] as string[]
+      };
+
+      // Delete transactions one by one to ensure proper permissions and audit logging
+      for (const transactionId of transactionIds) {
+        try {
+          const success = await storage.deleteTransaction(transactionId, user.teamId, user.id);
+          if (success) {
+            results.deleted++;
+          } else {
+            results.errors.push(`Transaction ${transactionId} not found`);
+          }
+        } catch (error) {
+          results.errors.push(`Failed to delete transaction ${transactionId}: ${error}`);
+        }
+      }
+
+      res.json({
+        message: `Batch deletion completed`,
+        deleted: results.deleted,
+        total: transactionIds.length,
+        errors: results.errors
+      });
+    } catch (error) {
+      console.error("Error deleting transactions in batch:", error);
+      res.status(500).json({ message: "Failed to delete transactions" });
     }
   });
 
@@ -695,7 +764,14 @@ export function registerRoutes(app: Express): Server {
 
     try {
       const user = req.user!;
-      const analytics = await storage.getBudgetAnalytics(user.teamId);
+      const { month, year } = req.query;
+      
+      // Default to current month if not specified
+      const now = new Date();
+      const targetMonth = month ? parseInt(month as string) : now.getMonth() + 1;
+      const targetYear = year ? parseInt(year as string) : now.getFullYear();
+      
+      const analytics = await storage.getBudgetAnalytics(user.teamId, targetMonth, targetYear);
       res.json(analytics);
     } catch (error) {
       console.error("Error fetching budget analytics:", error);
@@ -834,13 +910,42 @@ export function registerRoutes(app: Express): Server {
         'application/pdf',
         'application/vnd.ms-excel',
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'text/csv'
+        'text/csv',
+        'image/jpeg',
+        'image/png',
+        'image/gif',
+        'image/webp',
+        'image/bmp'
       ];
       
       if (allowedTypes.includes(file.mimetype)) {
         cb(null, true);
       } else {
-        cb(new Error('Invalid file type. Only PDF, Excel, and CSV files are allowed.'));
+        cb(new Error('Invalid file type. Only PDF, Excel, CSV, and image files are allowed.'));
+      }
+    }
+  });
+
+  // Configure multer for image uploads (supports multiple images)
+  const imageUpload = multer({
+    dest: "uploads/",
+    limits: {
+      fileSize: 10 * 1024 * 1024, // 10MB limit per file
+      files: 5, // Maximum 5 images at once
+    },
+    fileFilter: (req, file, cb) => {
+      const allowedTypes = [
+        'image/jpeg',
+        'image/png',
+        'image/gif',
+        'image/webp',
+        'image/bmp'
+      ];
+      
+      if (allowedTypes.includes(file.mimetype)) {
+        cb(null, true);
+      } else {
+        cb(new Error('Invalid file type. Only image files (JPEG, PNG, GIF, WebP, BMP) are allowed.'));
       }
     }
   });
@@ -1563,8 +1668,8 @@ export function registerRoutes(app: Express): Server {
           fileContent = pdfData.text;
           fileAnalysis = await financeAgent.analyzeFile(fileContent, file.filename, context);
         } else if (file.mimetype.startsWith('image/')) {
-          // For images, we'll create a descriptive message
-          fileAnalysis = `He recibido una imagen llamada "${file.filename}" (${(file.size / 1024 / 1024).toFixed(2)} MB). Las imágenes pueden contener capturas de pantalla de transacciones, recibos o estados de cuenta. ¿Podrías describir qué contiene esta imagen para poder ayudarte mejor?`;
+          // For images, use the vision API to analyze
+          fileAnalysis = await financeAgent.analyzeImageWithFile(file.path, message, context);
         } else {
           // Try to read as text
           fileContent = await fs.readFile(file.path, 'utf-8');
@@ -1624,6 +1729,116 @@ export function registerRoutes(app: Express): Server {
       }
       
       res.status(500).json({ message: "Failed to process chat message with file" });
+    }
+  });
+
+  // Chat with image uploads (supports multiple images)
+  app.post("/api/agent/chat-with-images", imageUpload.array('images', 5), async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const user = req.user!;
+      const { message = '', sessionId } = req.body;
+      const files = req.files as Express.Multer.File[];
+
+      if (!files || files.length === 0) {
+        return res.status(400).json({ message: "At least one image is required" });
+      }
+
+      if (!sessionId || typeof sessionId !== 'string') {
+        return res.status(400).json({ message: "Session ID is required" });
+      }
+
+      // Import agent here to avoid circular dependency issues
+      const { financeAgent } = await import("./agent");
+
+      // Get context data
+      const team = await storage.getTeam(user.teamId);
+      if (!team) {
+        return res.status(404).json({ message: "Team not found" });
+      }
+
+      const context = {
+        user,
+        team,
+        storage
+      };
+
+      // Load conversation history for this session
+      const conversations = await storage.getConversations(sessionId, 20);
+      const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+      
+      conversations.reverse().forEach(conv => {
+        conversationHistory.push({ role: 'user', content: conv.message });
+        
+        let assistantContent = conv.response;
+        if (conv.context && typeof conv.context === 'object' && 'toolsUsed' in conv.context) {
+          const toolsUsed = conv.context.toolsUsed as string[];
+          if (Array.isArray(toolsUsed) && toolsUsed.length > 0) {
+            assistantContent += `\n\n[Herramientas utilizadas: ${toolsUsed.join(', ')}]`;
+          }
+        }
+        
+        conversationHistory.push({ role: 'assistant', content: assistantContent });
+      });
+
+      // Create message with image context
+      const imagesList = files.map(f => f.filename).join(', ');
+      const combinedMessage = message 
+        ? `${message}\n\n[Imágenes adjuntas: ${imagesList}]`
+        : `He subido ${files.length} imagen(es): ${imagesList}`;
+
+      // Get AI response with images
+      const imagePaths = files.map(f => f.path);
+      const result = await financeAgent.chat(combinedMessage, context, conversationHistory, imagePaths);
+
+      // Store conversation with image information
+      await storage.createConversation({
+        message: message || `He subido ${files.length} imagen(es)`,
+        response: result.response,
+        context: { 
+          teamId: user.teamId, 
+          userId: user.id, 
+          toolsUsed: result.toolsUsed,
+          imageInfo: files.map(f => ({
+            name: f.filename,
+            size: f.size,
+            type: f.mimetype,
+            originalPath: f.path
+          }))
+        },
+        sessionId,
+        teamId: user.teamId,
+        userId: user.id
+      });
+
+      // Clean up temporary files
+      for (const file of files) {
+        try {
+          await fs.unlink(file.path);
+        } catch (error) {
+          console.error("Error cleaning up temporary image file:", error);
+        }
+      }
+
+      res.json({ response: result.response, toolsUsed: result.toolsUsed });
+    } catch (error) {
+      console.error("Error in agent chat with images:", error);
+      
+      // Clean up files if they exist
+      if (req.files && Array.isArray(req.files)) {
+        for (const file of req.files as Express.Multer.File[]) {
+          try {
+            await fs.unlink(file.path);
+          } catch (cleanupError) {
+            console.error("Error cleaning up image file after error:", cleanupError);
+          }
+        }
+      }
+      
+      res.status(500).json({ message: "Failed to process chat message with images" });
     }
   });
 

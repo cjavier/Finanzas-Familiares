@@ -84,8 +84,12 @@ export default function AddTransactionPage() {
       return;
     }
 
+    // Ensure amount is positive since all are stored as positive costs
+    const numericAmount = parseFloat(amount);
+    const finalAmount = Math.abs(numericAmount).toString();
+
     const data = {
-      amount,
+      amount: finalAmount,
       description,
       categoryId,
       date,
@@ -101,9 +105,9 @@ export default function AddTransactionPage() {
       <Container maxW="2xl" py={8}>
         <VStack spacing={6} align="stretch">
           <VStack align="start" spacing={2}>
-            <Heading size="lg">Nueva Transacción</Heading>
+            <Heading size="lg">Nuevo Gasto</Heading>
             <Text color="gray.600">
-              Registra una nueva transacción para tu equipo
+              Registra un nuevo gasto para tu equipo
             </Text>
           </VStack>
 
@@ -123,7 +127,7 @@ export default function AddTransactionPage() {
                   </FormControl>
 
                   <FormControl isRequired>
-                    <FormLabel>Monto</FormLabel>
+                    <FormLabel>Monto del Gasto</FormLabel>
                     <NumberInput
                       value={amount}
                       onChange={(value) => setAmount(value)}
@@ -140,7 +144,7 @@ export default function AddTransactionPage() {
                       </NumberInputStepper>
                     </NumberInput>
                     <Text fontSize="sm" color="gray.500" mt={1}>
-                      Ingresa el monto sin signo. Los gastos se registrarán como negativos automáticamente.
+                      Ingresa el monto del gasto. Se registrará automáticamente como egreso.
                     </Text>
                   </FormControl>
 
@@ -190,7 +194,7 @@ export default function AddTransactionPage() {
                       loadingText="Creando..."
                       flex={1}
                     >
-                      Crear Transacción
+                      Crear Gasto
                     </Button>
                   </HStack>
                 </VStack>
@@ -207,9 +211,9 @@ export default function AddTransactionPage() {
                 </Heading>
                 <VStack align="start" spacing={2} fontSize="sm" color="gray.600">
                   <Text>• Usa descripciones claras para facilitar la búsqueda posterior</Text>
-                  <Text>• Los montos se registran como gastos (negativos) por defecto</Text>
-                  <Text>• Para ingresos, usa categorías específicas como "Salario" o "Ingresos extra"</Text>
-                  <Text>• Puedes editar la transacción más tarde si es necesario</Text>
+                  <Text>• Solo registramos gastos - todos los montos se guardan como egresos</Text>
+                  <Text>• El monto se convertirá automáticamente a negativo</Text>
+                  <Text>• Puedes editar el gasto más tarde si es necesario</Text>
                 </VStack>
               </VStack>
             </CardBody>

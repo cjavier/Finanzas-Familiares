@@ -43,12 +43,19 @@ import {
   FaPlus,
   FaEdit,
   FaTrash,
+  FaChevronLeft,
+  FaChevronRight,
 } from 'react-icons/fa';
 
 export default function BudgetsPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const cardBg = useColorModeValue('white', 'gray.700');
+  
+  // Date navigation state
+  const currentDate = new Date();
+  const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
   
   // Modal states
   const { isOpen, onOpen, onClose } = useDisclosure();
@@ -61,7 +68,15 @@ export default function BudgetsPage() {
 
   // Fetch budget analytics
   const { data: budgetAnalytics = [], isLoading: isLoadingBudgets } = useQuery<any[]>({
-    queryKey: ['/api/budgets/analytics'],
+    queryKey: ['/api/budgets/analytics', selectedMonth, selectedYear],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        month: selectedMonth.toString(),
+        year: selectedYear.toString(),
+      });
+      const res = await apiRequest('GET', `/api/budgets/analytics?${params}`);
+      return await res.json();
+    },
     enabled: !!user,
   });
 
@@ -139,6 +154,44 @@ export default function BudgetsPage() {
       });
     },
   });
+
+  // Month navigation functions
+  const navigateMonth = (direction: 'prev' | 'next') => {
+    if (direction === 'prev') {
+      if (selectedMonth === 1) {
+        setSelectedMonth(12);
+        setSelectedYear(selectedYear - 1);
+      } else {
+        setSelectedMonth(selectedMonth - 1);
+      }
+    } else {
+      if (selectedMonth === 12) {
+        setSelectedMonth(1);
+        setSelectedYear(selectedYear + 1);
+      } else {
+        setSelectedMonth(selectedMonth + 1);
+      }
+    }
+  };
+
+  const goToCurrentMonth = () => {
+    const now = new Date();
+    setSelectedYear(now.getFullYear());
+    setSelectedMonth(now.getMonth() + 1);
+  };
+
+  const getMonthName = (month: number, year: number) => {
+    const date = new Date(year, month - 1);
+    return date.toLocaleDateString('es-ES', { 
+      month: 'long', 
+      year: 'numeric' 
+    });
+  };
+
+  const isCurrentMonth = () => {
+    const now = new Date();
+    return selectedYear === now.getFullYear() && selectedMonth === (now.getMonth() + 1);
+  };
 
   const resetForm = () => {
     setBudgetAmount('');
@@ -240,20 +293,69 @@ export default function BudgetsPage() {
             </Button>
           </HStack>
 
+          {/* Month Navigation */}
+          <Card bg={cardBg}>
+            <CardBody>
+              <HStack justify="space-between" align="center">
+                <IconButton
+                  aria-label="Mes anterior"
+                  icon={<FaChevronLeft />}
+                  onClick={() => navigateMonth('prev')}
+                  variant="ghost"
+                  size="sm"
+                />
+                
+                <VStack spacing={1}>
+                  <Heading size="md" textAlign="center" textTransform="capitalize">
+                    {getMonthName(selectedMonth, selectedYear)}
+                  </Heading>
+                  {!isCurrentMonth() && (
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      colorScheme="blue"
+                      onClick={goToCurrentMonth}
+                    >
+                      Ir al mes actual
+                    </Button>
+                  )}
+                </VStack>
+                
+                <IconButton
+                  aria-label="Mes siguiente"
+                  icon={<FaChevronRight />}
+                  onClick={() => navigateMonth('next')}
+                  variant="ghost"
+                  size="sm"
+                />
+              </HStack>
+            </CardBody>
+          </Card>
+
           {budgetAnalytics.length === 0 ? (
             <Card bg={cardBg}>
               <CardBody>
                 <VStack spacing={4}>
                   <Text fontSize="lg" color="gray.500">
-                    No tienes presupuestos configurados
+                    {isCurrentMonth() 
+                      ? "No tienes presupuestos configurados para este mes"
+                      : `No hay datos de presupuestos para ${getMonthName(selectedMonth, selectedYear).toLowerCase()}`
+                    }
                   </Text>
-                  <Button
-                    leftIcon={<Icon as={FaPlus} />}
-                    colorScheme="blue"
-                    onClick={handleOpenCreate}
-                  >
-                    Crear tu primer presupuesto
-                  </Button>
+                  {isCurrentMonth() && (
+                    <Button
+                      leftIcon={<Icon as={FaPlus} />}
+                      colorScheme="blue"
+                      onClick={handleOpenCreate}
+                    >
+                      Crear tu primer presupuesto
+                    </Button>
+                  )}
+                  {!isCurrentMonth() && (
+                    <Text fontSize="sm" color="gray.400">
+                      Los presupuestos se crean para el mes actual. Ve al mes actual para crear presupuestos.
+                    </Text>
+                  )}
                 </VStack>
               </CardBody>
             </Card>
@@ -328,9 +430,16 @@ export default function BudgetsPage() {
                             )}
                           </HStack>
 
-                          <Text fontSize="xs" color="gray.500" textAlign="center">
-                            Período: {budget.period === 'monthly' ? 'Mensual' : budget.period === 'weekly' ? 'Semanal' : budget.period === 'biweekly' ? 'Quincenal' : 'Personalizado'}
-                          </Text>
+                          <VStack spacing={1}>
+                            <Text fontSize="xs" color="gray.500" textAlign="center">
+                              Período: {budget.period === 'monthly' ? 'Mensual' : budget.period === 'weekly' ? 'Semanal' : budget.period === 'biweekly' ? 'Quincenal' : 'Personalizado'}
+                            </Text>
+                            {!isCurrentMonth() && (
+                              <Badge size="sm" colorScheme="blue" variant="outline">
+                                Datos históricos - {getMonthName(selectedMonth, selectedYear)}
+                              </Badge>
+                            )}
+                          </VStack>
                         </VStack>
                       </CardBody>
                     </Card>
@@ -341,7 +450,12 @@ export default function BudgetsPage() {
               <Card bg={cardBg}>
                 <CardBody>
                   <VStack spacing={4}>
-                    <Heading size="md">Resumen Total</Heading>
+                    <VStack spacing={1}>
+                      <Heading size="md">Resumen Total</Heading>
+                      <Text fontSize="sm" color="gray.600" textTransform="capitalize">
+                        {getMonthName(selectedMonth, selectedYear)}
+                      </Text>
+                    </VStack>
                     <SimpleGrid columns={{ base: 1, md: 3 }} spacing={6} w="full">
                       <VStack>
                         <Text fontSize="2xl" fontWeight="bold" color="blue.500">

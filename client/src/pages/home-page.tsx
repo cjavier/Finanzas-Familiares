@@ -120,13 +120,25 @@ export default function HomePage() {
   });
 
   const handleSubmit = async (data: TransactionForm) => {
+    const processedData = { ...data };
+    
+    if (editingTransaction) {
+      // For editing, ensure amounts are always positive
+      const numericAmount = parseFloat(data.amount);
+      processedData.amount = Math.abs(numericAmount).toString();
+    } else {
+      // For new transactions, ensure amounts are positive (since all costs are stored as positive)
+      const numericAmount = parseFloat(data.amount);
+      processedData.amount = Math.abs(numericAmount).toString();
+    }
+
     if (editingTransaction) {
       updateTransactionMutation.mutate({
         id: editingTransaction.id,
-        data,
+        data: processedData,
       });
     } else {
-      createTransactionMutation.mutate(data);
+      createTransactionMutation.mutate(processedData);
     }
   };
 
@@ -135,6 +147,7 @@ export default function HomePage() {
     form.reset({
       description: transaction.description,
       categoryId: transaction.categoryId,
+      // All amounts are positive now
       amount: transaction.amount,
       date: transaction.date,
     });
@@ -175,11 +188,8 @@ export default function HomePage() {
   const monthSummary = currentMonthTransactions.reduce(
     (acc, transaction) => {
       const amount = parseFloat(transaction.amount);
-      if (amount > 0) {
-        acc.income += amount;
-      } else {
-        acc.expenses += Math.abs(amount);
-      }
+      // Since this is a cost tracking app, all amounts are expenses
+      acc.expenses += amount;
       return acc;
     },
     { income: 0, expenses: 0 }
@@ -187,13 +197,12 @@ export default function HomePage() {
 
   const balance = monthSummary.income - monthSummary.expenses;
 
-  // Category breakdown
+  // Category breakdown - all transactions are expenses now
   const categoryBreakdown = currentMonthTransactions
-    .filter(t => parseFloat(t.amount) < 0)
     .reduce((acc, transaction) => {
       const category = getCategoryById(transaction.categoryId);
       const categoryName = category?.name || 'Unknown';
-      const amount = Math.abs(parseFloat(transaction.amount));
+      const amount = parseFloat(transaction.amount);
       acc[categoryName] = (acc[categoryName] || 0) + amount;
       return acc;
     }, {} as Record<string, number>);
@@ -583,7 +592,7 @@ export default function HomePage() {
                     {...form.register("amount")}
                   />
                 </div>
-                <p className="text-xs text-gray-600 mt-1">Enter positive amount for income, negative for expenses</p>
+                <p className="text-xs text-gray-600 mt-1">Enter amount without sign. Expenses are recorded as negative automatically.</p>
                 {form.formState.errors.amount && (
                   <p className="text-sm text-red-500 mt-1">
                     {form.formState.errors.amount.message}

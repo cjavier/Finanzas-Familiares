@@ -47,7 +47,7 @@ export interface IStorage {
   createBudget(budget: InsertBudget & { teamId: string }): Promise<Budget>;
   updateBudget(id: string, budget: Partial<InsertBudget>): Promise<Budget | undefined>;
   deleteBudget(id: string, teamId: string): Promise<boolean>;
-  getBudgetAnalytics(teamId: string): Promise<any[]>;
+  getBudgetAnalytics(teamId: string, month?: number, year?: number): Promise<any[]>;
   
   // Transaction methods
   getTransactions(teamId: string, filters?: { categoryId?: string; fromDate?: string; toDate?: string; status?: string; search?: string; page?: number; limit?: number }): Promise<Transaction[]>;
@@ -542,12 +542,17 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
-  async getBudgetAnalytics(teamId: string): Promise<any[]> {
-    // Get current date to calculate periods
+  async getBudgetAnalytics(teamId: string, month?: number, year?: number): Promise<any[]> {
+    // Get target date (default to current month if not specified)
     const now = new Date();
-    const currentMonth = now.toISOString().slice(0, 7); // YYYY-MM format
-    const startOfMonth = `${currentMonth}-01`;
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+    const targetYear = year || now.getFullYear();
+    const targetMonth = month || (now.getMonth() + 1);
+    
+    // Calculate month boundaries
+    const monthStr = targetMonth.toString().padStart(2, '0');
+    const yearMonth = `${targetYear}-${monthStr}`;
+    const startOfMonth = `${yearMonth}-01`;
+    const endOfMonth = new Date(targetYear, targetMonth, 0).toISOString().slice(0, 10);
 
     // Join budgets with categories and calculate spending
     const result = await db
