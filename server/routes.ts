@@ -2278,7 +2278,7 @@ export function registerRoutes(app: Express): Server {
         default:
           const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
           fromDate = `${currentMonth}-01`;
-          toDate = `${currentMonth}-31`;
+          toDate = getLocalDateYMD(new Date(now.getFullYear(), now.getMonth() + 1, 0));
           break;
       }
       
@@ -2436,6 +2436,14 @@ export function registerRoutes(app: Express): Server {
   });
 
   // Helper functions for dashboard analytics
+  function endOfMonthFromYYYYMM(month: string): string {
+    const [yearStr, monthStr] = month.split('-');
+    const year = parseInt(yearStr, 10);
+    const monthIndexPlusOne = parseInt(monthStr, 10); // 1-12
+    const lastDay = new Date(year, monthIndexPlusOne, 0); // day 0 => last day of given month
+    return getLocalDateYMD(lastDay);
+  }
+
   interface BudgetSummary {
     totalBudget: number;
     totalSpent: number;
@@ -2490,7 +2498,7 @@ export function registerRoutes(app: Express): Server {
     const transactions = await storage.getTransactions(teamId, {
       categoryId,
       fromDate: `${month}-01`,
-      toDate: `${month}-31`
+      toDate: endOfMonthFromYYYYMM(month)
     });
 
     return transactions
@@ -2502,7 +2510,7 @@ export function registerRoutes(app: Express): Server {
     const [transactions, categories] = await Promise.all([
       storage.getTransactions(teamId, {
         fromDate: `${month}-01`,
-        toDate: `${month}-31`
+        toDate: endOfMonthFromYYYYMM(month)
       }),
       storage.getCategories(teamId)
     ]);
