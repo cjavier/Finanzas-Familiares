@@ -39,10 +39,21 @@ export default function TeamPage() {
   const [teamName, setTeamName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const cardBg = useColorModeValue('white', 'gray.700');
+  const [newBank, setNewBank] = useState('');
+  const [editingBank, setEditingBank] = useState<string | null>(null);
+  const [editingBankName, setEditingBankName] = useState('');
+  const [removingBank, setRemovingBank] = useState<string | null>(null);
+  const [replacementBank, setReplacementBank] = useState('');
 
   // Fetch team data
   const { data: teamData, isLoading: teamLoading } = useQuery<TeamWithMembers>({
     queryKey: ['/api/team'],
+    enabled: !!user,
+  });
+
+  // Fetch banks
+  const { data: banks = [], refetch: refetchBanks, isLoading: banksLoading } = useQuery<string[]>({
+    queryKey: ['/api/banks'],
     enabled: !!user,
   });
 
@@ -123,6 +134,56 @@ export default function TeamPage() {
         variant: "destructive",
       });
     },
+  });
+
+  // Add bank mutation
+  const addBankMutation = useMutation({
+    mutationFn: async (name: string) => {
+      const res = await apiRequest('POST', '/api/banks', { name });
+      return await res.json();
+    },
+    onSuccess: async () => {
+      await refetchBanks();
+      setNewBank('');
+      toast({ title: 'Banco agregado', description: 'El banco se agregó a tus preferencias.' });
+    },
+    onError: () => {
+      toast({ title: 'Error', description: 'No se pudo agregar el banco', variant: 'destructive' });
+    }
+  });
+
+  // Rename bank mutation
+  const renameBankMutation = useMutation({
+    mutationFn: async ({ oldName, newName }: { oldName: string; newName: string }) => {
+      const res = await apiRequest('PUT', `/api/banks/${encodeURIComponent(oldName)}`, { newName });
+      return await res.json();
+    },
+    onSuccess: async () => {
+      await refetchBanks();
+      setEditingBank(null);
+      setEditingBankName('');
+      toast({ title: 'Banco renombrado', description: 'Se actualizó el nombre en preferencias y transacciones.' });
+    },
+    onError: () => {
+      toast({ title: 'Error', description: 'No se pudo renombrar el banco', variant: 'destructive' });
+    }
+  });
+
+  // Replace bank mutation (remove + replacement)
+  const replaceBankMutation = useMutation({
+    mutationFn: async ({ removed, replacement }: { removed: string; replacement: string }) => {
+      const res = await apiRequest('DELETE', `/api/banks/${encodeURIComponent(removed)}`, { replacement });
+      return await res.json();
+    },
+    onSuccess: async () => {
+      await refetchBanks();
+      setRemovingBank(null);
+      setReplacementBank('');
+      toast({ title: 'Banco reemplazado', description: 'Se reemplazó el banco en preferencias y transacciones.' });
+    },
+    onError: () => {
+      toast({ title: 'Error', description: 'No se pudo reemplazar el banco', variant: 'destructive' });
+    }
   });
 
   // Change member role mutation
@@ -421,6 +482,124 @@ export default function TeamPage() {
                     </HStack>
                   ))}
                 </VStack>
+              </VStack>
+            </CardBody>
+          </Card>
+
+          {/* Banks Management */}
+          <Card bg={cardBg}>
+            <CardBody>
+              <VStack spacing={4} align="stretch">
+                <Heading size="md">Bancos</Heading>
+
+                {banksLoading ? (
+                  <Text>Cargando bancos…</Text>
+                ) : (
+                  <VStack align="stretch" spacing={3}>
+                    {banks.map((b) => (
+                      <HStack key={b} justify="space-between">
+                        {editingBank === b ? (
+                          <HStack flex={1} spacing={3}>
+                            <Input
+                              value={editingBankName}
+                              onChange={(e) => setEditingBankName(e.target.value)}
+                              placeholder="Nuevo nombre de banco"
+                            />
+                            <Button
+                              colorScheme="blue"
+                              size="sm"
+                              onClick={() => {
+                                const name = editingBankName.trim();
+                                if (!name) return;
+                                renameBankMutation.mutate({ oldName: b, newName: name });
+                              }}
+                              isLoading={renameBankMutation.isPending}
+                            >
+                              Guardar
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => { setEditingBank(null); setEditingBankName(''); }}>
+                              Cancelar
+                            </Button>
+                          </HStack>
+                        ) : (
+                          <>
+                            <Text flex={1}>{b}</Text>
+                            {isAdmin && (
+                              <HStack>
+                                <Button size="sm" leftIcon={<FaEdit />} onClick={() => { setEditingBank(b); setEditingBankName(b); }}>
+                                  Renombrar
+                                </Button>
+                                <Button size="sm" leftIcon={<FaTrash />} colorScheme="red" variant="outline" onClick={() => { setRemovingBank(b); setReplacementBank(banks.find(x => x !== b) || ''); }}>
+                                  Eliminar
+                                </Button>
+                              </HStack>
+                            )}
+                          </>
+                        )}
+                      </HStack>
+                    ))}
+                  </VStack>
+                )}
+
+                {isAdmin && (
+                  <HStack pt={2}>
+                    <Input
+                      placeholder="Agregar nuevo banco"
+                      value={newBank}
+                      onChange={(e) => setNewBank(e.target.value)}
+                    />
+                    <Button
+                      colorScheme="blue"
+                      leftIcon={<FaPlus />}
+                      onClick={() => {
+                        const name = newBank.trim();
+                        if (!name) return;
+                        addBankMutation.mutate(name);
+                      }}
+                      isLoading={addBankMutation.isPending}
+                    >
+                      Agregar
+                    </Button>
+                  </HStack>
+                )}
+
+                {/* Replacement UI when removing a bank */}
+                {removingBank && (
+                  <VStack align="stretch" spacing={3} p={4} border="1px" borderColor="gray.200" borderRadius="md">
+                    <Text>Eliminar banco "{removingBank}". Selecciona banco de reemplazo para transacciones asociadas:</Text>
+                    <HStack>
+                      <Input
+                        placeholder="Selecciona o escribe reemplazo"
+                        value={replacementBank}
+                        onChange={(e) => setReplacementBank(e.target.value)}
+                        list="banks-list"
+                      />
+                      <datalist id="banks-list">
+                        {banks.filter(b => b !== removingBank).map(b => (
+                          <option key={b} value={b} />
+                        ))}
+                      </datalist>
+                      <Button
+                        colorScheme="red"
+                        onClick={() => {
+                          const rep = replacementBank.trim();
+                          if (!rep) {
+                            toast({ title: 'Reemplazo requerido', description: 'Selecciona un banco de reemplazo.', variant: 'destructive' });
+                            return;
+                          }
+                          replaceBankMutation.mutate({ removed: removingBank!, replacement: rep });
+                        }}
+                        isLoading={replaceBankMutation.isPending}
+                      >
+                        Confirmar reemplazo
+                      </Button>
+                      <Button variant="ghost" onClick={() => { setRemovingBank(null); setReplacementBank(''); }}>
+                        Cancelar
+                      </Button>
+                    </HStack>
+                  </VStack>
+                )}
+
               </VStack>
             </CardBody>
           </Card>

@@ -354,13 +354,14 @@ class FinanceAgent {
 
     const createTransactionsTool = tool({
       name: 'crear_transacciones',
-      description: 'Crea una o múltiples transacciones financieras para el equipo',
+      description: 'Crea una o múltiples transacciones financieras para el equipo. IMPORTANTE: El campo "banco" debe ser uno de los bancos configurados por el usuario en sus preferencias. Usa /api/banks para obtener opciones actuales.',
       parameters: z.object({
         transacciones: z.array(z.object({
           descripcion: z.string().describe('Descripción de la transacción'),
           monto: z.number().describe('Monto de la transacción (positivo para ingresos, negativo para gastos)'),
           fecha: z.string().describe('Fecha de la transacción en formato YYYY-MM-DD'),
           categoriaId: z.string().describe('ID de la categoría para la transacción'),
+          banco: z.string().nullable().optional().describe('Nombre del banco. Debe ser una opción válida de preferencias del usuario'),
           estado: z.enum(['active', 'deleted', 'pending']).nullable().optional().describe('Estado de la transacción (default: active)')
         })).describe('Array de transacciones a crear')
       }),
@@ -373,6 +374,10 @@ class FinanceAgent {
         
         try {
           const categories = await this.context.storage.getCategories(this.context.team.id);
+          // Obtener bancos disponibles desde preferencias del usuario
+          const userBanks = Array.isArray((this.context.user as any).preferences?.banks)
+            ? (this.context.user as any).preferences.banks as string[]
+            : ['Banregio', 'BBVA'];
           const createdTransactions = [];
           const errors = [];
           
@@ -385,6 +390,13 @@ class FinanceAgent {
                 errors.push(`Transacción ${index + 1}: La categoría con ID ${transaccion.categoriaId} no existe`);
                 continue;
               }
+
+              // Validar banco
+              const selectedBank = transaccion.banco || userBanks[0] || 'Banregio';
+              if (!userBanks.includes(selectedBank)) {
+                errors.push(`Transacción ${index + 1}: El banco "${selectedBank}" no es válido. Opciones disponibles: ${userBanks.join(', ')}`);
+                continue;
+              }
               
               // Crear la transacción
               const newTransaction = await this.context.storage.createTransaction({
@@ -392,6 +404,7 @@ class FinanceAgent {
                 amount: transaccion.monto.toString(),
                 date: transaccion.fecha,
                 categoryId: transaccion.categoriaId,
+                bank: selectedBank,
                 status: transaccion.estado || 'active',
                 teamId: this.context.team.id,
                 userId: this.context.user.id
@@ -403,6 +416,7 @@ class FinanceAgent {
                 monto: transaccion.monto,
                 fecha: transaccion.fecha,
                 categoria: category.name,
+                banco: selectedBank,
                 estado: transaccion.estado || 'active'
               });
             } catch (error) {
@@ -483,11 +497,15 @@ class FinanceAgent {
       - gestionar_presupuesto: Crea o edita presupuestos
       
       INSTRUCCIONES PARA REGISTRAR TRANSACCIONES:
-      1. Usa la herramienta de  OBTENER_CATEGORIA para entender las categorias que se tienen disponibles. Si hay transacciones iguales o muy parecidas, sugierele al usuario sumarlas en una sola transaccion
+      1. Usa la herramienta OBTENER_CATEGORIAS para entender las categorías disponibles.
       2. Usa la herramienta de OBTENER_REGLAS para entender las reglas de categorización que se tienen disponibles
       3. Antes de registrar las transacciones muestra al usuario una tabla en formato markdown con la forma en como vas a clasificar las transacciones
       4. Al terminas de registrar las transacciones, sugiere al usuario nuevas reglas para categorizar las transacciones
       5. Solo si el usuario lo aprueba, usa la herramienta de CREAR_REGLAS para crear las reglas
+
+      BANCOS DISPONIBLES (desde preferencias del usuario): ${'${Array.isArray(context.user.preferences?.banks) ? context.user.preferences.banks.join(", ") : "Banregio, BBVA"}'}
+      - Al crear transacciones, añade el campo "banco" usando una de las opciones disponibles.
+      - Si el usuario no especifica banco, usa el primer banco disponible.
       
       MANEJO DE FECHAS:
       - Usa la fecha actual ("today") y las horas de mensajes para interpretar referencias temporales relativas

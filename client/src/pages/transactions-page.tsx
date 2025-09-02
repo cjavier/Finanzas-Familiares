@@ -56,6 +56,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { Transaction, Category } from '@shared/schema';
+import { useEffect } from 'react';
 import { formatYmdForDisplay } from '@/lib/utils';
 import { 
   FaPlus, 
@@ -76,6 +77,7 @@ export default function TransactionsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [statusFilter, setStatusFilter] = useState('active');
+  const [bankFilter, setBankFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
@@ -86,6 +88,7 @@ export default function TransactionsPage() {
   const [editDescription, setEditDescription] = useState('');
   const [editCategoryId, setEditCategoryId] = useState('');
   const [editDate, setEditDate] = useState('');
+  const [editBank, setEditBank] = useState('');
 
   // Batch selection states
   const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
@@ -102,10 +105,11 @@ export default function TransactionsPage() {
     if (searchTerm) params.append('search', searchTerm);
     if (selectedCategory) params.append('categoryId', selectedCategory);
     if (statusFilter) params.append('status', statusFilter);
+    if (bankFilter) params.append('bank', bankFilter);
     if (dateFrom) params.append('fromDate', dateFrom);
     if (dateTo) params.append('toDate', dateTo);
     return params.toString();
-  }, [searchTerm, selectedCategory, statusFilter, dateFrom, dateTo]);
+  }, [searchTerm, selectedCategory, statusFilter, bankFilter, dateFrom, dateTo]);
 
   // Fetch transactions
   const { data: transactions = [], isLoading: isLoadingTransactions } = useQuery<Transaction[]>({
@@ -121,6 +125,12 @@ export default function TransactionsPage() {
   // Fetch categories for filtering and editing
   const { data: categories = [] } = useQuery<Category[]>({
     queryKey: ['/api/categories'],
+    enabled: !!user,
+  });
+
+  // Fetch banks
+  const { data: banks = [], refetch: refetchBanks } = useQuery<string[]>({
+    queryKey: ['/api/banks'],
     enabled: !!user,
   });
 
@@ -224,11 +234,12 @@ export default function TransactionsPage() {
     setEditDescription(transaction.description);
     setEditCategoryId(transaction.categoryId);
     setEditDate(transaction.date);
+    setEditBank((transaction as any).bank || banks[0] || 'Banregio');
     onOpen();
   };
 
   const handleUpdateTransaction = () => {
-    if (!editingTransaction || !editAmount || !editDescription || !editCategoryId) {
+    if (!editingTransaction || !editAmount || !editDescription || !editCategoryId || !editBank) {
       toast({
         title: "Error",
         description: "Por favor completa todos los campos requeridos.",
@@ -246,6 +257,7 @@ export default function TransactionsPage() {
       description: editDescription,
       categoryId: editCategoryId,
       date: editDate,
+      bank: editBank,
     };
 
     updateTransactionMutation.mutate({ id: editingTransaction.id, data });
@@ -425,6 +437,20 @@ export default function TransactionsPage() {
                       onChange={(e) => setDateTo(e.target.value)}
                     />
                   </FormControl>
+
+                  <FormControl maxW="220px">
+                    <FormLabel fontSize="sm">Banco</FormLabel>
+                    <Select
+                      size="sm"
+                      value={bankFilter}
+                      onChange={(e) => setBankFilter(e.target.value)}
+                    >
+                      <option value="">Todos los bancos</option>
+                      {banks.map((b) => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                    </Select>
+                  </FormControl>
                 </HStack>
               </VStack>
             </CardBody>
@@ -461,6 +487,7 @@ export default function TransactionsPage() {
                       <Th>Descripción</Th>
                       <Th>Categoría</Th>
                       <Th>Monto</Th>
+                      <Th>Banco</Th>
                       <Th>Fecha</Th>
                       <Th>Estado</Th>
                       <Th>Acciones</Th>
@@ -497,6 +524,9 @@ export default function TransactionsPage() {
                           >
                             {formatAmount(transaction.amount)}
                           </Text>
+                        </Td>
+                        <Td>
+                          <Text>{(transaction as any).bank}</Text>
                         </Td>
                         <Td>
                           <Text>{formatYmdForDisplay(transaction.date)}</Text>
@@ -607,6 +637,36 @@ export default function TransactionsPage() {
                       {category.icon} {category.name}
                     </option>
                   ))}
+                </Select>
+              </FormControl>
+
+              <FormControl isRequired>
+                <FormLabel>Banco</FormLabel>
+                <Select
+                  value={editBank}
+                  onChange={async (e) => {
+                    const value = e.target.value;
+                    if (value === '__add__') {
+                      const name = window.prompt('Nombre del nuevo banco');
+                      if (name && name.trim()) {
+                        try {
+                          await apiRequest('POST', '/api/banks', { name: name.trim() });
+                          await refetchBanks();
+                          setEditBank(name.trim());
+                        } catch (err) {
+                          toast({ title: 'Error', description: 'No se pudo agregar el banco', variant: 'destructive' });
+                        }
+                      }
+                      return;
+                    }
+                    setEditBank(value);
+                  }}
+                  placeholder="Selecciona un banco"
+                >
+                  {banks.map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                  <option value="__add__">Agregar banco…</option>
                 </Select>
               </FormControl>
 

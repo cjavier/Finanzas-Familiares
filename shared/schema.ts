@@ -1,5 +1,5 @@
 import { pgTable, text, uuid, boolean, decimal, date, timestamp, jsonb } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -19,6 +19,8 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   role: text("role", { enum: ["admin", "member"] }).default("member").notNull(),
   isActive: boolean("is_active").default(true).notNull(),
+  // JSONB user preferences. Example shape: { banks: string[] }
+  preferences: jsonb("preferences").$type<{ banks?: string[] }>().default(sql`'{}'::jsonb`).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -71,6 +73,7 @@ export const transactions = pgTable("transactions", {
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
   description: text("description").notNull(),
   date: date("date").notNull(),
+  bank: text("bank").default('Banregio').notNull(),
   source: text("source", { enum: ["manual", "statement", "ticket", "ocr", "file"] }).default("manual").notNull(),
   status: text("status", { enum: ["active", "deleted", "pending"] }).default("active").notNull(),
   fileId: uuid("file_id").references(() => files.id),
@@ -297,6 +300,7 @@ export const insertUserSchema = createInsertSchema(users).omit({
   updatedAt: true,
   teamId: true,
   passwordHash: true,
+  preferences: true,
 }).extend({
   teamName: z.string().optional(),
   inviteCode: z.string().optional(),
@@ -338,6 +342,7 @@ export const insertTransactionSchema = createInsertSchema(transactions).omit({
   }, {
     message: "Amount must be a positive number",
   }),
+  bank: z.string().min(1, "Bank is required"),
 });
 
 export const insertRuleSchema = createInsertSchema(rules).omit({

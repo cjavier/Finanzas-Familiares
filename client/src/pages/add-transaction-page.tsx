@@ -31,6 +31,7 @@ import { useToast } from '@/hooks/use-toast';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { Category } from '@shared/schema';
 import { getLocalDateYMD } from '@/lib/utils';
+import { useEffect } from 'react';
 
 export default function AddTransactionPage() {
   const { user } = useAuth();
@@ -40,6 +41,7 @@ export default function AddTransactionPage() {
   const [description, setDescription] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [date, setDate] = useState(getLocalDateYMD());
+  const [bank, setBank] = useState('');
 
   const cardBg = useColorModeValue('white', 'gray.700');
 
@@ -49,9 +51,21 @@ export default function AddTransactionPage() {
     enabled: !!user,
   });
 
+  // Fetch banks
+  const { data: banks = [], refetch: refetchBanks } = useQuery<string[]>({
+    queryKey: ['/api/banks'],
+    enabled: !!user,
+  });
+
+  useEffect(() => {
+    if (!bank && banks && banks.length > 0) {
+      setBank(banks[0]);
+    }
+  }, [banks]);
+
   // Create transaction mutation
   const createTransactionMutation = useMutation({
-    mutationFn: async (data: { amount: string; description: string; categoryId: string; date: string }) => {
+    mutationFn: async (data: { amount: string; description: string; categoryId: string; date: string; bank: string }) => {
       const res = await apiRequest('POST', '/api/transactions', data);
       return await res.json();
     },
@@ -76,7 +90,7 @@ export default function AddTransactionPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!amount || !description || !categoryId) {
+    if (!amount || !description || !categoryId || !bank) {
       toast({
         title: "Error",
         description: "Todos los campos son requeridos.",
@@ -94,6 +108,7 @@ export default function AddTransactionPage() {
       description,
       categoryId,
       date,
+      bank,
     };
 
     createTransactionMutation.mutate(data);
@@ -168,6 +183,36 @@ export default function AddTransactionPage() {
                         No hay categorías disponibles. Crea algunas categorías primero.
                       </Alert>
                     )}
+                  </FormControl>
+
+                  <FormControl isRequired>
+                    <FormLabel>Banco</FormLabel>
+                    <Select
+                      placeholder="Selecciona un banco"
+                      value={bank}
+                      onChange={async (e) => {
+                        const value = e.target.value;
+                        if (value === '__add__') {
+                          const name = window.prompt('Nombre del nuevo banco');
+                          if (name && name.trim()) {
+                            try {
+                              await apiRequest('POST', '/api/banks', { name: name.trim() });
+                              await refetchBanks();
+                              setBank(name.trim());
+                            } catch (err) {
+                              toast({ title: 'Error', description: 'No se pudo agregar el banco', variant: 'destructive' });
+                            }
+                          }
+                          return;
+                        }
+                        setBank(value);
+                      }}
+                    >
+                      {banks.map((b) => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                      <option value="__add__">Agregar banco…</option>
+                    </Select>
                   </FormControl>
 
                   <FormControl isRequired>

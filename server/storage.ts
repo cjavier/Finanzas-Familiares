@@ -51,7 +51,7 @@ export interface IStorage {
   getBudgetAnalytics(teamId: string, month?: number, year?: number): Promise<any[]>;
   
   // Transaction methods
-  getTransactions(teamId: string, filters?: { categoryId?: string; fromDate?: string; toDate?: string; status?: string; search?: string; page?: number; limit?: number }): Promise<Transaction[]>;
+  getTransactions(teamId: string, filters?: { categoryId?: string; fromDate?: string; toDate?: string; status?: string; search?: string; bank?: string; page?: number; limit?: number }): Promise<Transaction[]>;
   getTransaction(id: string, teamId: string): Promise<Transaction | undefined>;
   createTransaction(transaction: InsertTransaction & { teamId: string; userId: string }): Promise<Transaction>;
   updateTransaction(id: string, transaction: Partial<InsertTransaction>, userId?: string): Promise<Transaction | undefined>;
@@ -71,6 +71,9 @@ export interface IStorage {
   updateRule(id: string, rule: Partial<InsertRule>): Promise<Rule | undefined>;
   deleteRule(id: string, teamId: string): Promise<boolean>;
   applyRulesToTransactions(teamId: string, userId: string): Promise<{ categorizedCount: number; totalProcessed: number; details: any[] }>;
+  // Banks helpers
+  renameBank(teamId: string, userId: string, oldName: string, newName: string): Promise<{ updatedTransactions: number; updatedUsers: number }>;
+  replaceBank(teamId: string, userId: string, removedName: string, replacementName: string): Promise<{ updatedTransactions: number; updatedUsers: number }>;
   
   // Notification methods
   getNotifications(teamId: string, userId?: string): Promise<Notification[]>;
@@ -107,6 +110,62 @@ export class DatabaseStorage implements IStorage {
       pool, 
       createTableIfMissing: true 
     });
+  }
+
+  async renameBank(teamId: string, userId: string, oldName: string, newName: string): Promise<{ updatedTransactions: number; updatedUsers: number }> {
+    // Update user preferences banks for all team members
+    const teamMembers = await this.getTeamMembers(teamId);
+    let updatedUsers = 0;
+    for (const member of teamMembers) {
+      const prefs = (member as any).preferences || {};
+      const banks: string[] = Array.isArray(prefs.banks) ? [...prefs.banks] : [];
+      const idx = banks.findIndex(b => b === oldName);
+      if (idx !== -1) {
+        banks[idx] = newName;
+        await db.update(users).set({
+          // cast to any to allow jsonb assignment
+          preferences: { ...prefs, banks },
+          updatedAt: new Date()
+        } as any).where(eq(users.id, member.id));
+        updatedUsers++;
+      }
+    }
+
+    // Update transactions bank field for the whole team
+    const result = await db
+      .update(transactions)
+      .set({ bank: newName, updatedAt: new Date() })
+      .where(and(eq(transactions.teamId, teamId), eq(transactions.bank as any, oldName)));
+
+    return { updatedTransactions: result.rowCount ?? 0, updatedUsers };
+  }
+
+  async replaceBank(teamId: string, userId: string, removedName: string, replacementName: string): Promise<{ updatedTransactions: number; updatedUsers: number }> {
+    // Update user preferences banks for all team members (remove removedName, ensure replacement exists)
+    const teamMembers = await this.getTeamMembers(teamId);
+    let updatedUsers = 0;
+    for (const member of teamMembers) {
+      const prefs = (member as any).preferences || {};
+      let banks: string[] = Array.isArray(prefs.banks) ? [...prefs.banks] : [];
+      const beforeLen = banks.length;
+      banks = banks.filter(b => b !== removedName);
+      if (!banks.includes(replacementName)) banks.push(replacementName);
+      if (beforeLen !== banks.length) {
+        await db.update(users).set({
+          preferences: { ...prefs, banks },
+          updatedAt: new Date()
+        } as any).where(eq(users.id, member.id));
+        updatedUsers++;
+      }
+    }
+
+    // Update all transactions with removedName -> replacementName
+    const result = await db
+      .update(transactions)
+      .set({ bank: replacementName, updatedAt: new Date() })
+      .where(and(eq(transactions.teamId, teamId), eq(transactions.bank as any, removedName)));
+
+    return { updatedTransactions: result.rowCount ?? 0, updatedUsers };
   }
 
   async getUser(id: string): Promise<User | undefined> {
@@ -166,10 +225,11 @@ export class DatabaseStorage implements IStorage {
       updateData.passwordHash = updateData.password;
       delete updateData.password;
     }
+    // Allow updating preferences JSONB transparently
     
     const [user] = await db
       .update(users)
-      .set({ ...updateData, updatedAt: new Date() })
+      .set({ ...updateData as any, updatedAt: new Date() })
       .where(eq(users.id, id))
       .returning();
     
@@ -285,7 +345,7 @@ export class DatabaseStorage implements IStorage {
     return team || undefined;
   }
 
-  async getTransactions(teamId: string, filters?: { categoryId?: string; fromDate?: string; toDate?: string; status?: string; search?: string; page?: number; limit?: number }): Promise<Transaction[]> {
+  async getTransactions(teamId: string, filters?: { categoryId?: string; fromDate?: string; toDate?: string; status?: string; search?: string; bank?: string; page?: number; limit?: number }): Promise<Transaction[]> {
     const conditions = [eq(transactions.teamId, teamId)];
     
     if (filters?.categoryId) {
@@ -309,6 +369,10 @@ export class DatabaseStorage implements IStorage {
     
     if (filters?.search) {
       conditions.push(like(transactions.description, `%${filters.search}%`));
+    }
+
+    if (filters?.bank) {
+      conditions.push(eq(transactions.bank as any, filters.bank));
     }
     
     const pageNumber = filters?.page || 1;

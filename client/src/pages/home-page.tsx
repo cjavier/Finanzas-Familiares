@@ -63,6 +63,11 @@ export default function HomePage() {
     enabled: !!user,
   });
 
+  const { data: banks = [] } = useQuery<string[]>({
+    queryKey: ["/api/banks"],
+    enabled: !!user,
+  });
+
   // Mutations
   const createTransactionMutation = useMutation({
     mutationFn: async (data: InsertTransaction) => {
@@ -578,6 +583,38 @@ export default function HomePage() {
                     {form.formState.errors.categoryId.message}
                   </p>
                 )}
+              </div>
+
+              <div>
+                <Label htmlFor="bank">Bank</Label>
+                <Select value={form.watch("bank") as any} onValueChange={async (value) => {
+                  if (value === "__add__") {
+                    const name = window.prompt('New bank name');
+                    if (name && name.trim()) {
+                      try {
+                        await apiRequest('POST', '/api/banks', { name: name.trim() });
+                        queryClient.invalidateQueries({ queryKey: ["/api/banks"] });
+                        form.setValue("bank" as any, name.trim());
+                      } catch (err) {
+                        toast({ title: 'Error', description: 'Failed to add bank', variant: 'destructive' });
+                      }
+                    }
+                    return;
+                  }
+                  form.setValue("bank" as any, value);
+                }}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select bank" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {banks.map((b) => (
+                      <SelectItem key={b} value={b}>
+                        {b}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="__add__">Add bank…</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div>

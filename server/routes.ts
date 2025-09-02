@@ -51,6 +51,130 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
+  // Banks endpoints (per-user preferences)
+  app.get("/api/banks", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const user = req.user!;
+      const banks = Array.isArray((user as any).preferences?.banks)
+        ? (user as any).preferences.banks as string[]
+        : [];
+      // Provide sensible defaults if empty
+      const result = banks.length > 0 ? banks : ["Banregio", "BBVA"];
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching banks:", error);
+      res.status(500).json({ message: "Failed to fetch banks" });
+    }
+  });
+
+  app.post("/api/banks", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const user = req.user!;
+      const { name } = req.body as { name?: string };
+
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        return res.status(400).json({ message: "Bank name is required" });
+      }
+
+      const existingBanks = Array.isArray((user as any).preferences?.banks)
+        ? [...(user as any).preferences.banks]
+        : [];
+
+      if (!existingBanks.includes(name)) {
+        existingBanks.push(name);
+      }
+
+      const updated = await storage.updateUser(user.id, {
+        // update preferences JSONB by overwriting with new value
+        // we rely on schema default '{}'::jsonb for non-existent
+        // @ts-ignore - allow preferences partial update
+        preferences: { ...(user as any).preferences, banks: existingBanks },
+      } as any);
+
+      if (!updated) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Update session user to reflect new preferences
+      (req.user as any).preferences = updated.preferences;
+
+      res.status(201).json(updated.preferences?.banks || existingBanks);
+    } catch (error) {
+      console.error("Error adding bank:", error);
+      res.status(500).json({ message: "Failed to add bank" });
+    }
+  });
+
+  // Rename a bank for current team and update all transactions
+  app.put("/api/banks/:oldName", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const user = req.user!;
+      const oldName = decodeURIComponent(req.params.oldName);
+      const { newName } = req.body as { newName?: string };
+
+      if (!newName || !newName.trim()) {
+        return res.status(400).json({ message: "New bank name is required" });
+      }
+
+      const result = await storage.renameBank(user.teamId, user.id, oldName, newName.trim());
+
+      // Update session user preferences cache if applicable
+      const currentBanks = Array.isArray((req.user as any).preferences?.banks) ? (req.user as any).preferences.banks as string[] : [];
+      const idx = currentBanks.indexOf(oldName);
+      if (idx !== -1) {
+        currentBanks[idx] = newName.trim();
+        (req.user as any).preferences = { ...(req.user as any).preferences, banks: currentBanks };
+      }
+
+      res.json({ success: true, ...result });
+    } catch (error) {
+      console.error("Error renaming bank:", error);
+      res.status(500).json({ message: "Failed to rename bank" });
+    }
+  });
+
+  // Remove a bank and replace all occurrences in transactions with another
+  app.delete("/api/banks/:name", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+
+    try {
+      const user = req.user!;
+      const removedName = decodeURIComponent(req.params.name);
+      const { replacement } = req.body as { replacement?: string };
+
+      if (!replacement || !replacement.trim()) {
+        return res.status(400).json({ message: "Replacement bank is required" });
+      }
+
+      const result = await storage.replaceBank(user.teamId, user.id, removedName, replacement.trim());
+
+      // Update session user preferences cache if applicable
+      const currentBanks = Array.isArray((req.user as any).preferences?.banks) ? (req.user as any).preferences.banks as string[] : [];
+      const filtered = currentBanks.filter((b: string) => b !== removedName);
+      if (!filtered.includes(replacement.trim())) filtered.push(replacement.trim());
+      (req.user as any).preferences = { ...(req.user as any).preferences, banks: filtered };
+
+      res.json({ success: true, ...result });
+    } catch (error) {
+      console.error("Error replacing bank:", error);
+      res.status(500).json({ message: "Failed to replace bank" });
+    }
+  });
+
   // Update team information
   app.put("/api/team", async (req, res) => {
     if (!req.isAuthenticated()) {
@@ -286,7 +410,7 @@ export function registerRoutes(app: Express): Server {
 
     try {
       const user = req.user!;
-      const { categoryId, fromDate, toDate, status, search, page = "1", limit = "50" } = req.query;
+      const { categoryId, fromDate, toDate, status, search, bank, page = "1", limit = "50" } = req.query;
       
       const transactions = await storage.getTransactions(user.teamId, {
         categoryId: categoryId as string,
@@ -294,6 +418,7 @@ export function registerRoutes(app: Express): Server {
         toDate: toDate as string,
         status: status as string,
         search: search as string,
+        bank: bank as string,
         page: parseInt(page as string),
         limit: parseInt(limit as string),
       });
@@ -319,6 +444,13 @@ export function registerRoutes(app: Express): Server {
       if (requestData.amount) {
         const numAmount = parseFloat(requestData.amount);
         requestData.amount = Math.abs(numAmount).toString();
+      }
+      // Ensure bank is present; default to user's first bank or Banregio
+      if (!requestData.bank) {
+        const prefBanks = Array.isArray((user as any).preferences?.banks)
+          ? (user as any).preferences.banks as string[]
+          : [];
+        requestData.bank = prefBanks[0] || 'Banregio';
       }
       
       const validatedData = insertTransactionSchema.parse(requestData);
