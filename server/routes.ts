@@ -11,6 +11,7 @@ import fs from "fs/promises";
 import { createReadStream } from "fs";
 import csvParser from "csv-parser";
 import * as XLSX from "xlsx";
+import { getLocalDateYMD, parseYmdToLocalDate } from "./utils/date";
 
 export function registerRoutes(app: Express): Server {
   // Check database connection on startup
@@ -546,7 +547,7 @@ export function registerRoutes(app: Express): Server {
               categoryId: category.id,
               amount: budgetAmount.toString(),
               period: 'monthly',
-              startDate: new Date().toISOString().split('T')[0], // Current date
+              startDate: getLocalDateYMD(), // Current date
               teamId: user.teamId,
             });
             createdBudgets.push(budget);
@@ -1302,13 +1303,13 @@ export function registerRoutes(app: Express): Server {
           if (first.length === 4) {
             const date = new Date(parseInt(first), parseInt(second) - 1, parseInt(third));
             if (!isNaN(date.getTime())) {
-              return date.toISOString().split('T')[0];
+              return getLocalDateYMD(date);
             }
           } else {
             // Try DD/MM/YYYY format first
             const date = new Date(parseInt(third), parseInt(second) - 1, parseInt(first));
             if (!isNaN(date.getTime())) {
-              return date.toISOString().split('T')[0];
+              return getLocalDateYMD(date);
             }
           }
         }
@@ -1317,7 +1318,7 @@ export function registerRoutes(app: Express): Server {
       // Fallback: try to parse as-is
       const date = new Date(dateStr);
       if (!isNaN(date.getTime())) {
-        return date.toISOString().split('T')[0];
+        return getLocalDateYMD(date);
       }
     } catch (error) {
       console.error('Error parsing date:', dateStr, error);
@@ -2134,8 +2135,8 @@ export function registerRoutes(app: Express): Server {
       switch (period) {
         case 'last-month':
           const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-          fromDate = lastMonth.toISOString().slice(0, 7) + '-01';
-          toDate = new Date(lastMonth.getFullYear(), lastMonth.getMonth() + 1, 0).toISOString().slice(0, 10);
+          fromDate = `${lastMonth.getFullYear()}-${String(lastMonth.getMonth() + 1).padStart(2, '0')}-01`;
+          toDate = getLocalDateYMD(new Date(lastMonth.getFullYear(), lastMonth.getMonth() + 1, 0));
           break;
         case 'current-year':
           fromDate = `${now.getFullYear()}-01-01`;
@@ -2143,7 +2144,7 @@ export function registerRoutes(app: Express): Server {
           break;
         case 'current-month':
         default:
-          const currentMonth = now.toISOString().slice(0, 7);
+          const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
           fromDate = `${currentMonth}-01`;
           toDate = `${currentMonth}-31`;
           break;
@@ -2233,8 +2234,8 @@ export function registerRoutes(app: Express): Server {
       startDate.setMonth(endDate.getMonth() - parseInt(months.toString()));
 
       const transactions = await storage.getTransactions(user.teamId, {
-        fromDate: startDate.toISOString().split('T')[0],
-        toDate: endDate.toISOString().split('T')[0]
+        fromDate: `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}`,
+        toDate: `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`
       });
 
       const analytics = calculateSpendingAnalytics(transactions, period.toString());
@@ -2260,8 +2261,8 @@ export function registerRoutes(app: Express): Server {
       startDate.setMonth(endDate.getMonth() - parseInt(months.toString()));
 
       const transactions = await storage.getTransactions(user.teamId, {
-        fromDate: startDate.toISOString().split('T')[0],
-        toDate: endDate.toISOString().split('T')[0]
+        fromDate: `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}`,
+        toDate: `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`
       });
 
       const trends = calculateSpendingTrends(transactions, period.toString());
@@ -2288,8 +2289,8 @@ export function registerRoutes(app: Express): Server {
 
       const [transactions, categories] = await Promise.all([
         storage.getTransactions(user.teamId, {
-          fromDate: startDate.toISOString().split('T')[0],
-          toDate: endDate.toISOString().split('T')[0]
+          fromDate: `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}`,
+          toDate: `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`
         }),
         storage.getCategories(user.teamId)
       ]);

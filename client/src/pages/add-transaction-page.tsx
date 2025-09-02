@@ -30,6 +30,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { Category } from '@shared/schema';
+import { getLocalDateYMD } from '@/lib/utils';
 
 export default function AddTransactionPage() {
   const { user } = useAuth();
@@ -38,7 +39,7 @@ export default function AddTransactionPage() {
   const [amount, setAmount] = useState<string>('');
   const [description, setDescription] = useState('');
   const [categoryId, setCategoryId] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(getLocalDateYMD());
 
   const cardBg = useColorModeValue('white', 'gray.700');
 
@@ -175,7 +176,7 @@ export default function AddTransactionPage() {
                       type="date"
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
-                      max={new Date().toISOString().split('T')[0]}
+                      max={getLocalDateYMD()}
                     />
                   </FormControl>
 

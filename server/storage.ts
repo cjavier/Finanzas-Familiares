@@ -7,6 +7,7 @@ import {
   type ChatSession, type InsertChatSession, type Conversation, type InsertConversation
 } from "@shared/schema";
 import { db } from "./db";
+import { getLocalDateYMD } from "./utils/date";
 import { eq, and, desc, gte, lte, isNull, or, sum, sql, like } from "drizzle-orm";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
@@ -956,7 +957,7 @@ export class DatabaseStorage implements IStorage {
         .where(and(
           eq(transactions.teamId, transaction.teamId),
           eq(transactions.status, 'active'),
-          gte(transactions.date, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
+          gte(transactions.date, getLocalDateYMD(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)))
         ))
         .limit(50);
 

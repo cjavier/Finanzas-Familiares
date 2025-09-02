@@ -56,6 +56,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { Transaction, Category } from '@shared/schema';
+import { formatYmdForDisplay } from '@/lib/utils';
 import { 
   FaPlus, 
   FaSearch, 
@@ -498,7 +499,7 @@ export default function TransactionsPage() {
                           </Text>
                         </Td>
                         <Td>
-                          <Text>{new Date(transaction.date).toLocaleDateString()}</Text>
+                          <Text>{formatYmdForDisplay(transaction.date)}</Text>
                         </Td>
                         <Td>
                           <Badge colorScheme={getStatusColor(transaction.status)}>

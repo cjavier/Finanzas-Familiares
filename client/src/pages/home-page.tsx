@@ -17,6 +17,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertTransactionSchema } from "@shared/schema";
 import { z } from "zod";
+import { getLocalDateYMD } from "@/lib/utils";
 
 const transactionFormSchema = insertTransactionSchema.extend({
   date: z.string().min(1, "Date is required"),
@@ -115,7 +116,7 @@ export default function HomePage() {
       description: "",
       categoryId: "",
       amount: "0",
-      date: new Date().toISOString().split('T')[0],
+      date: getLocalDateYMD(),
     },
   });
 
@@ -166,7 +167,7 @@ export default function HomePage() {
       description: "",
       categoryId: "",
       amount: "0",
-      date: new Date().toISOString().split('T')[0],
+      date: getLocalDateYMD(),
     });
     setIsTransactionModalOpen(true);
   };
