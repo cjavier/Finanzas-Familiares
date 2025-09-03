@@ -92,6 +92,7 @@ export default function TransactionsPage() {
   // Edit modal states
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const editingTransactionIdRef = useRef<string | null>(null);
   const [editAmount, setEditAmount] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editCategoryId, setEditCategoryId] = useState('');
@@ -240,6 +241,7 @@ export default function TransactionsPage() {
 
   const handleOpenEdit = (transaction: Transaction) => {
     setEditingTransaction(transaction);
+    editingTransactionIdRef.current = transaction.id;
     // Show the absolute value in the input field since all are expenses
     setEditAmount(Math.abs(parseFloat(transaction.amount)).toString());
     setEditDescription(transaction.description);
@@ -250,7 +252,7 @@ export default function TransactionsPage() {
   };
 
   const handleUpdateTransaction = () => {
-    if (!editingTransaction || !editAmount || !editDescription || !editCategoryId || !editBank) {
+    if ((!editingTransaction && !editingTransactionIdRef.current) || !editAmount || !editDescription || !editCategoryId || !editBank) {
       toast({
         title: "Error",
         description: "Por favor completa todos los campos requeridos.",
@@ -271,7 +273,14 @@ export default function TransactionsPage() {
       bank: editBank,
     };
 
-    updateTransactionMutation.mutate({ id: editingTransaction.id, data });
+    const id = editingTransaction?.id || editingTransactionIdRef.current!;
+    updateTransactionMutation.mutate({ id, data });
+  };
+
+  const handleCloseEditModal = () => {
+    setEditingTransaction(null);
+    editingTransactionIdRef.current = null;
+    onClose();
   };
 
   const getCategoryName = (categoryId: string) => {
@@ -732,7 +741,7 @@ export default function TransactionsPage() {
       </Container>
 
       {/* Edit Transaction Modal */}
-      <Modal isOpen={isOpen} onClose={onClose} size="lg">
+      <Modal isOpen={isOpen} onClose={handleCloseEditModal} size="lg">
         <ModalOverlay />
         <ModalContent>
           <ModalHeader>Editar Gasto</ModalHeader>
@@ -820,7 +829,7 @@ export default function TransactionsPage() {
           </ModalBody>
 
           <ModalFooter>
-            <Button variant="ghost" mr={3} onClick={onClose}>
+            <Button variant="ghost" mr={3} onClick={handleCloseEditModal}>
               Cancelar
             </Button>
             <Button

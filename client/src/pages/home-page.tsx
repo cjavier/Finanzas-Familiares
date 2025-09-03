@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ export default function HomePage() {
   const [currentView, setCurrentView] = useState<"dashboard" | "transactions">("dashboard");
   const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const editingTransactionIdRef = useRef<string | null>(null);
   const [filters, setFilters] = useState({
     category: "",
     fromDate: "",
@@ -63,7 +64,7 @@ export default function HomePage() {
     enabled: !!user,
   });
 
-  const { data: banks = [] } = useQuery<string[]>({
+  const { data: banks = [], refetch: refetchBanks } = useQuery<string[]>({
     queryKey: ["/api/banks"],
     enabled: !!user,
   });
@@ -128,7 +129,7 @@ export default function HomePage() {
   const handleSubmit = async (data: TransactionForm) => {
     const processedData = { ...data };
     
-    if (editingTransaction) {
+    if (editingTransaction || editingTransactionIdRef.current) {
       // For editing, ensure amounts are always positive
       const numericAmount = parseFloat(data.amount);
       processedData.amount = Math.abs(numericAmount).toString();
@@ -138,11 +139,9 @@ export default function HomePage() {
       processedData.amount = Math.abs(numericAmount).toString();
     }
 
-    if (editingTransaction) {
-      updateTransactionMutation.mutate({
-        id: editingTransaction.id,
-        data: processedData,
-      });
+    if (editingTransaction || editingTransactionIdRef.current) {
+      const id = editingTransaction?.id || editingTransactionIdRef.current!;
+      updateTransactionMutation.mutate({ id, data: processedData });
     } else {
       createTransactionMutation.mutate(processedData);
     }
@@ -150,12 +149,15 @@ export default function HomePage() {
 
   const handleEdit = (transaction: Transaction) => {
     setEditingTransaction(transaction);
+    editingTransactionIdRef.current = transaction.id;
     form.reset({
       description: transaction.description,
       categoryId: transaction.categoryId,
       // All amounts are positive now
       amount: transaction.amount,
       date: transaction.date,
+      // Ensure bank is present in the form when editing
+      bank: (transaction as any).bank as any,
     });
     setIsTransactionModalOpen(true);
   };
@@ -168,11 +170,14 @@ export default function HomePage() {
 
   const openNewTransactionModal = () => {
     setEditingTransaction(null);
+    editingTransactionIdRef.current = null;
     form.reset({
       description: "",
       categoryId: "",
       amount: "0",
       date: getLocalDateYMD(),
+      // Default bank to first available when creating new transaction
+      bank: (banks && banks.length > 0 ? (banks[0] as any) : undefined) as any,
     });
     setIsTransactionModalOpen(true);
   };
@@ -231,6 +236,16 @@ export default function HomePage() {
     const category = getCategoryById(categoryId);
     return category?.icon || "📦";
   };
+
+  // Keep form bank default in sync when banks load and creating a new transaction
+  useEffect(() => {
+    if (!editingTransaction && editingTransactionIdRef.current === null) {
+      const currentBank = form.getValues("bank" as any) as any;
+      if ((!currentBank || currentBank === "") && banks && banks.length > 0) {
+        form.setValue("bank" as any, banks[0] as any);
+      }
+    }
+  }, [banks]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -593,7 +608,7 @@ export default function HomePage() {
                     if (name && name.trim()) {
                       try {
                         await apiRequest('POST', '/api/banks', { name: name.trim() });
-                        queryClient.invalidateQueries({ queryKey: ["/api/banks"] });
+                        await refetchBanks();
                         form.setValue("bank" as any, name.trim());
                       } catch (err) {
                         toast({ title: 'Error', description: 'Failed to add bank', variant: 'destructive' });
