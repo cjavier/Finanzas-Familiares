@@ -378,6 +378,7 @@ class FinanceAgent {
           const userBanks = Array.isArray((this.context.user as any).preferences?.banks)
             ? (this.context.user as any).preferences.banks as string[]
             : ['Banregio', 'BBVA'];
+          console.log('[Agent.crear_transacciones] Banks for user', this.context.user.id, 'team', this.context.team.id, '->', userBanks);
           const createdTransactions = [];
           const errors = [];
           
@@ -393,8 +394,10 @@ class FinanceAgent {
 
               // Validar banco
               const selectedBank = transaccion.banco || userBanks[0] || 'Banregio';
+              console.log('[Agent.crear_transacciones] tx', index + 1, 'descr:', transaccion.descripcion, 'selectedBank:', selectedBank);
               if (!userBanks.includes(selectedBank)) {
                 errors.push(`Transacción ${index + 1}: El banco "${selectedBank}" no es válido. Opciones disponibles: ${userBanks.join(', ')}`);
+                console.warn('[Agent.crear_transacciones] invalid bank for user', this.context.user.id, '->', selectedBank, 'valid:', userBanks);
                 continue;
               }
               
@@ -503,9 +506,10 @@ class FinanceAgent {
       4. Al terminas de registrar las transacciones, sugiere al usuario nuevas reglas para categorizar las transacciones
       5. Solo si el usuario lo aprueba, usa la herramienta de CREAR_REGLAS para crear las reglas
 
-      BANCOS DISPONIBLES (desde preferencias del usuario): ${'${Array.isArray(context.user.preferences?.banks) ? context.user.preferences.banks.join(", ") : "Banregio, BBVA"}'}
+      BANCOS:
+      - Consulta el CONTEXTO para ver los bancos disponibles del usuario.
       - Al crear transacciones, añade el campo "banco" usando una de las opciones disponibles.
-      - Si el usuario no especifica banco, usa el primer banco disponible.
+      - Si el usuario no especifica banco, usa el primer banco disponible del contexto.
       
       MANEJO DE FECHAS:
       - Usa la fecha actual ("today") y las horas de mensajes para interpretar referencias temporales relativas
@@ -531,6 +535,13 @@ class FinanceAgent {
       this.context = context; // Set context for tools to use
       this.currentToolsUsed.clear(); // Reset tools tracking
       
+      // Log banks available in context for QA
+      const banksInContext = Array.isArray((context.user as any).preferences?.banks)
+        ? (context.user as any).preferences.banks as string[]
+        : [];
+      const banksForUse = banksInContext.length > 0 ? banksInContext : ['Banregio', 'BBVA'];
+      console.log('[Agent.chat] Banks for user', context.user.id, 'team', context.team.id, '->', banksForUse);
+
       const contextPrompt = this.buildContextPrompt(context);
       
       // Build the conversation context for the agent
@@ -716,6 +727,10 @@ Enfócate en patrones claros como nombres de comercios, tipos de transacciones, 
       minute: '2-digit'
     });
     
+    const banks = Array.isArray((context.user as any).preferences?.banks) && (context.user as any).preferences.banks.length > 0
+      ? ((context.user as any).preferences.banks as string[]).join(', ')
+      : 'Banregio, BBVA';
+
     return `CONTEXTO DEL EQUIPO FINANCIERO:
     
 🏥 Equipo: ${context.team.name}
@@ -727,6 +742,8 @@ Enfócate en patrones claros como nombres de comercios, tipos de transacciones, 
 📅 Fecha actual (today): ${currentDate}
 🕐 Hora actual: ${currentTime}
 📆 Fecha y hora completa: ${currentDateTime}
+
+💳 BANCOS DISPONIBLES (preferencias del usuario): ${banks}
 
 📋 INSTRUCCIONES IMPORTANTES:
 - Tienes acceso completo a todas las herramientas de gestión financiera

@@ -64,6 +64,7 @@ export function registerRoutes(app: Express): Server {
         : [];
       // Provide sensible defaults if empty
       const result = banks.length > 0 ? banks : ["Banregio", "BBVA"];
+      console.log('[GET /api/banks] user', user.id, 'team', user.teamId, 'banks', result);
       res.json(result);
     } catch (error) {
       console.error("Error fetching banks:", error);
@@ -105,6 +106,7 @@ export function registerRoutes(app: Express): Server {
 
       // Update session user to reflect new preferences
       (req.user as any).preferences = updated.preferences;
+      console.log('[POST /api/banks] user', user.id, 'team', user.teamId, 'added', name.trim(), 'banks now', updated.preferences?.banks || existingBanks);
 
       res.status(201).json(updated.preferences?.banks || existingBanks);
     } catch (error) {
@@ -138,6 +140,7 @@ export function registerRoutes(app: Express): Server {
         (req.user as any).preferences = { ...(req.user as any).preferences, banks: currentBanks };
       }
 
+      console.log('[PUT /api/banks/:oldName] user', user.id, 'team', user.teamId, 'renamed', oldName, '->', newName.trim());
       res.json({ success: true, ...result });
     } catch (error) {
       console.error("Error renaming bank:", error);
@@ -168,6 +171,7 @@ export function registerRoutes(app: Express): Server {
       if (!filtered.includes(replacement.trim())) filtered.push(replacement.trim());
       (req.user as any).preferences = { ...(req.user as any).preferences, banks: filtered };
 
+      console.log('[DELETE /api/banks/:name] user', user.id, 'team', user.teamId, 'removed', removedName, 'replacement', replacement.trim());
       res.json({ success: true, ...result });
     } catch (error) {
       console.error("Error replacing bank:", error);
