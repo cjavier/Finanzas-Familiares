@@ -80,6 +80,14 @@ export default function TransactionsPage() {
   const [bankFilter, setBankFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  // Draft date filters for better UX (apply when ready)
+  const [draftDateFrom, setDraftDateFrom] = useState('');
+  const [draftDateTo, setDraftDateTo] = useState('');
+  const [quickRange, setQuickRange] = useState(''); // '', current-month, last-30, last-month, current-year
+
+  // Pagination
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(50);
 
   // Edit modal states
   const { isOpen, onOpen, onClose } = useDisclosure();
@@ -108,8 +116,10 @@ export default function TransactionsPage() {
     if (bankFilter) params.append('bank', bankFilter);
     if (dateFrom) params.append('fromDate', dateFrom);
     if (dateTo) params.append('toDate', dateTo);
+    if (page) params.append('page', String(page));
+    if (limit) params.append('limit', String(limit));
     return params.toString();
-  }, [searchTerm, selectedCategory, statusFilter, bankFilter, dateFrom, dateTo]);
+  }, [searchTerm, selectedCategory, statusFilter, bankFilter, dateFrom, dateTo, page, limit]);
 
   // Fetch transactions
   const { data: transactions = [], isLoading: isLoadingTransactions } = useQuery<Transaction[]>({
@@ -120,6 +130,7 @@ export default function TransactionsPage() {
       return await res.json();
     },
     enabled: !!user,
+    placeholderData: (previous) => previous,
   });
 
   // Fetch categories for filtering and editing
@@ -322,6 +333,74 @@ export default function TransactionsPage() {
   const isAllSelected = transactions.length > 0 && selectedTransactions.size === transactions.length;
   const isIndeterminate = selectedTransactions.size > 0 && selectedTransactions.size < transactions.length;
 
+  // Keep draft dates in sync when effective dates change externally
+  useEffect(() => {
+    setDraftDateFrom(dateFrom);
+    setDraftDateTo(dateTo);
+  }, [dateFrom, dateTo]);
+
+  // Reset to first page when effective filters change
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, selectedCategory, statusFilter, bankFilter, dateFrom, dateTo]);
+
+  const applyDateFilters = () => {
+    setDateFrom(draftDateFrom || '');
+    setDateTo(draftDateTo || '');
+    setPage(1);
+  };
+
+  const clearDateFilters = () => {
+    setDraftDateFrom('');
+    setDraftDateTo('');
+    setDateFrom('');
+    setDateTo('');
+    setQuickRange('');
+    setPage(1);
+  };
+
+  const applyQuickRange = (range: string) => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+
+    let from = '';
+    let to = '';
+
+    if (range === 'current-month') {
+      from = `${yyyy}-${mm}-01`;
+      const endOfMonth = new Date(yyyy, today.getMonth() + 1, 0);
+      to = `${endOfMonth.getFullYear()}-${String(endOfMonth.getMonth() + 1).padStart(2, '0')}-${String(endOfMonth.getDate()).padStart(2, '0')}`;
+    } else if (range === 'last-month') {
+      const lastMonthDate = new Date(yyyy, today.getMonth() - 1, 1);
+      const lyyyy = lastMonthDate.getFullYear();
+      const lmm = String(lastMonthDate.getMonth() + 1).padStart(2, '0');
+      from = `${lyyyy}-${lmm}-01`;
+      const endOfLastMonth = new Date(lyyyy, lastMonthDate.getMonth() + 1, 0);
+      to = `${endOfLastMonth.getFullYear()}-${String(endOfLastMonth.getMonth() + 1).padStart(2, '0')}-${String(endOfLastMonth.getDate()).padStart(2, '0')}`;
+    } else if (range === 'last-30') {
+      const start = new Date(today);
+      start.setDate(today.getDate() - 29);
+      from = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+      to = `${yyyy}-${mm}-${dd}`;
+    } else if (range === 'current-year') {
+      from = `${yyyy}-01-01`;
+      to = `${yyyy}-12-31`;
+    } else {
+      // custom
+      setQuickRange('');
+      return;
+    }
+
+    setQuickRange(range);
+    setDraftDateFrom(from);
+    setDraftDateTo(to);
+    setDateFrom(from);
+    setDateTo(to);
+    setPage(1);
+  };
+
   if (isLoadingTransactions) {
     return (
       <Box>
@@ -418,13 +497,28 @@ export default function TransactionsPage() {
                 </Flex>
 
                 <HStack spacing={4}>
+                  <FormControl maxW="220px">
+                    <FormLabel fontSize="sm">Rango rápido</FormLabel>
+                    <Select
+                      size="sm"
+                      value={quickRange}
+                      onChange={(e) => applyQuickRange(e.target.value)}
+                    >
+                      <option value="">Personalizado</option>
+                      <option value="current-month">Mes actual</option>
+                      <option value="last-month">Mes anterior</option>
+                      <option value="last-30">Últimos 30 días</option>
+                      <option value="current-year">Año actual</option>
+                    </Select>
+                  </FormControl>
+
                   <FormControl maxW="200px">
                     <FormLabel fontSize="sm">Desde</FormLabel>
                     <Input
                       type="date"
                       size="sm"
-                      value={dateFrom}
-                      onChange={(e) => setDateFrom(e.target.value)}
+                      value={draftDateFrom}
+                      onChange={(e) => setDraftDateFrom(e.target.value)}
                     />
                   </FormControl>
 
@@ -433,8 +527,8 @@ export default function TransactionsPage() {
                     <Input
                       type="date"
                       size="sm"
-                      value={dateTo}
-                      onChange={(e) => setDateTo(e.target.value)}
+                      value={draftDateTo}
+                      onChange={(e) => setDraftDateTo(e.target.value)}
                     />
                   </FormControl>
 
@@ -451,6 +545,15 @@ export default function TransactionsPage() {
                       ))}
                     </Select>
                   </FormControl>
+
+                  <HStack pt={6} spacing={2} align="flex-end">
+                    <Button size="sm" colorScheme="blue" onClick={applyDateFilters}>
+                      Aplicar
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={clearDateFilters}>
+                      Limpiar
+                    </Button>
+                  </HStack>
                 </HStack>
               </VStack>
             </CardBody>
@@ -588,6 +691,41 @@ export default function TransactionsPage() {
                   </Tbody>
                 </Table>
               )}
+            </CardBody>
+            {/* Pagination controls */}
+            <CardBody pt={0}>
+              <Flex justify="space-between" align="center" wrap="wrap" gap={3}>
+                <HStack>
+                  <Text fontSize="sm" color="gray.600">Página {page}</Text>
+                  <Text fontSize="sm" color="gray.500">• {transactions.length} elementos</Text>
+                </HStack>
+                <HStack>
+                  <Select
+                    size="sm"
+                    value={limit}
+                    onChange={(e) => { setLimit(parseInt(e.target.value)); setPage(1); }}
+                    maxW="110px"
+                  >
+                    <option value={25}>25 / pág.</option>
+                    <option value={50}>50 / pág.</option>
+                    <option value={100}>100 / pág.</option>
+                  </Select>
+                  <Button
+                    size="sm"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    isDisabled={page <= 1}
+                  >
+                    Anterior
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => setPage((p) => p + 1)}
+                    isDisabled={transactions.length < limit}
+                  >
+                    Siguiente
+                  </Button>
+                </HStack>
+              </Flex>
             </CardBody>
           </Card>
         </VStack>
