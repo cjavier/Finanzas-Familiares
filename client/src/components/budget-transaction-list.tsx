@@ -44,7 +44,7 @@ interface BudgetTransactionListProps {
 }
 
 export function BudgetTransactionList({ categoryId, fromDate, toDate, categories }: BudgetTransactionListProps) {
-  const { toast } = useToast();
+  const toast = useToast();
   const queryClient = useQueryClient();
 
   const { data: transactions = [], isLoading } = useQuery<Transaction[]>({

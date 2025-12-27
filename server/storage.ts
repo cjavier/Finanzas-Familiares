@@ -399,6 +399,11 @@ export class DatabaseStorage implements IStorage {
     // First, try to apply rules to categorize the transaction automatically
     let finalTransaction = { ...transaction };
     
+    // Ensure amount is positive
+    if (finalTransaction.amount) {
+      finalTransaction.amount = Math.abs(parseFloat(finalTransaction.amount.toString())).toString();
+    }
+    
     // Get active rules for the team
     const activeRules = await db
       .select()
@@ -453,6 +458,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateTransaction(id: string, transactionData: Partial<InsertTransaction>, userId?: string): Promise<Transaction | undefined> {
+    // Ensure amount is positive
+    if (transactionData.amount) {
+      transactionData.amount = Math.abs(parseFloat(transactionData.amount.toString())).toString();
+    }
+
     // Get the original transaction for audit logging
     const [originalTransaction] = await db
       .select()
