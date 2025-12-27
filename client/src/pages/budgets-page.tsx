@@ -85,6 +85,24 @@ export default function BudgetsPage() {
     enabled: !!user,
   });
 
+  // Fetch previous month budget analytics
+  const prevDate = new Date(selectedYear, selectedMonth - 2, 1);
+  const prevMonth = prevDate.getMonth() + 1;
+  const prevYear = prevDate.getFullYear();
+
+  const { data: prevBudgetAnalytics = [] } = useQuery<any[]>({
+    queryKey: ['/api/budgets/analytics', prevMonth, prevYear],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        month: prevMonth.toString(),
+        year: prevYear.toString(),
+      });
+      const res = await apiRequest('GET', `/api/budgets/analytics?${params}`);
+      return await res.json();
+    },
+    enabled: !!user,
+  });
+
   // Fetch categories for the budget creation form
   const { data: categories = [] } = useQuery<Category[]>({
     queryKey: ['/api/categories'],
@@ -351,20 +369,24 @@ export default function BudgetsPage() {
           ) : (
             <>
               <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
-                {budgetAnalytics.map((budget) => (
-                  <BudgetCard
-                    key={budget.budgetId}
-                    budget={budget}
-                    cardBg={cardBg}
-                    categories={categories}
-                    month={selectedMonth}
-                    year={selectedYear}
-                    isHistorical={!isCurrentMonth()}
-                    historicalLabel={getMonthName(selectedMonth, selectedYear)}
-                    onEdit={handleOpenEdit}
-                    onDelete={deleteBudgetMutation.mutate}
-                  />
-                ))}
+                {budgetAnalytics.map((budget) => {
+                  const prevBudget = prevBudgetAnalytics.find(b => b.categoryId === budget.categoryId);
+                  return (
+                    <BudgetCard
+                      key={budget.budgetId}
+                      budget={budget}
+                      prevBudget={prevBudget}
+                      cardBg={cardBg}
+                      categories={categories}
+                      month={selectedMonth}
+                      year={selectedYear}
+                      isHistorical={!isCurrentMonth()}
+                      historicalLabel={getMonthName(selectedMonth, selectedYear)}
+                      onEdit={handleOpenEdit}
+                      onDelete={deleteBudgetMutation.mutate}
+                    />
+                  );
+                })}
               </SimpleGrid>
 
               <Card bg={cardBg}>
@@ -503,6 +525,7 @@ export default function BudgetsPage() {
 
 function BudgetCard({ 
   budget, 
+  prevBudget,
   cardBg, 
   categories, 
   month, 
@@ -513,6 +536,7 @@ function BudgetCard({
   onDelete 
 }: {
   budget: any;
+  prevBudget?: any;
   cardBg: string;
   categories: Category[];
   month: number;
@@ -633,6 +657,20 @@ function BudgetCard({
               </Text>
             )}
           </HStack>
+
+          {prevBudget && (
+            <Text 
+              fontSize="xs" 
+              color={prevBudget.remaining >= 0 ? "green.500" : "red.500"} 
+              textAlign="right"
+              mt={-1}
+            >
+              {prevBudget.remaining >= 0 
+                ? `Mes pasado sobraron $${prevBudget.remaining.toLocaleString()}`
+                : `Mes pasado excedido por $${Math.abs(prevBudget.remaining).toLocaleString()}`
+              }
+            </Text>
+          )}
 
           <VStack spacing={1}>
             <Text fontSize="xs" color="gray.500" textAlign="center">
