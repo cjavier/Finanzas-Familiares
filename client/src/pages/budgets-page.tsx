@@ -31,6 +31,7 @@ import {
   Alert,
   AlertIcon,
   IconButton,
+  Collapse,
 } from '@chakra-ui/react';
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -45,7 +46,11 @@ import {
   FaTrash,
   FaChevronLeft,
   FaChevronRight,
+  FaChevronDown,
+  FaChevronUp,
 } from 'react-icons/fa';
+import { BudgetTransactionList } from '@/components/budget-transaction-list';
+import { format } from 'date-fns';
 
 export default function BudgetsPage() {
   const { user } = useAuth();
@@ -242,22 +247,6 @@ export default function BudgetsPage() {
     }
   };
 
-  const getProgressColor = (status: string) => {
-    switch (status) {
-      case 'over': return 'red';
-      case 'warning': return 'orange';
-      default: return 'green';
-    }
-  };
-
-  const getBudgetStatusBadge = (status: string) => {
-    switch (status) {
-      case 'over': return { text: 'Excedido', color: 'red' };
-      case 'warning': return { text: 'Cerca del límite', color: 'orange' };
-      default: return { text: 'En presupuesto', color: 'green' };
-    }
-  };
-
   if (isLoadingBudgets) {
     return (
       <Box>
@@ -362,89 +351,20 @@ export default function BudgetsPage() {
           ) : (
             <>
               <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
-                {budgetAnalytics.map((budget) => {
-                  const statusBadge = getBudgetStatusBadge(budget.status);
-                  
-                  return (
-                    <Card key={budget.budgetId} bg={cardBg}>
-                      <CardBody>
-                        <VStack spacing={4} align="stretch">
-                          <HStack justify="space-between">
-                            <HStack spacing={3}>
-                              <Text fontSize="2xl">
-                                {budget.category.icon || '💰'}
-                              </Text>
-                              <VStack align="start" spacing={0}>
-                                <Text fontWeight="bold">{budget.category.name}</Text>
-                                <Badge colorScheme={statusBadge.color} size="sm">
-                                  {statusBadge.text}
-                                </Badge>
-                              </VStack>
-                            </HStack>
-                            
-                            <HStack spacing={2}>
-                              <IconButton
-                                aria-label="Editar presupuesto"
-                                icon={<FaEdit />}
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleOpenEdit(budget)}
-                              />
-                              <IconButton
-                                aria-label="Eliminar presupuesto"
-                                icon={<FaTrash />}
-                                size="sm"
-                                variant="ghost"
-                                colorScheme="red"
-                                onClick={() => deleteBudgetMutation.mutate(budget.budgetId)}
-                              />
-                            </HStack>
-                          </HStack>
-
-                          <Progress 
-                            value={Math.min(budget.percentage, 100)} 
-                            colorScheme={getProgressColor(budget.status)}
-                            size="lg"
-                            borderRadius="md"
-                          />
-
-                          <HStack justify="space-between" fontSize="sm">
-                            <Text color="gray.600">
-                              ${budget.spentAmount.toLocaleString()} gastado
-                            </Text>
-                            <Text fontWeight="medium">
-                              ${budget.budgetAmount.toLocaleString()} asignado
-                            </Text>
-                          </HStack>
-
-                          <HStack justify="space-between" fontSize="xs" color="gray.500">
-                            <Text>{budget.percentage.toFixed(1)}% utilizado</Text>
-                            {budget.isOverBudget ? (
-                              <Text color="red.500">
-                                Excedido por ${Math.abs(budget.remaining).toLocaleString()}
-                              </Text>
-                            ) : (
-                              <Text color="green.500">
-                                Disponible: ${budget.remaining.toLocaleString()}
-                              </Text>
-                            )}
-                          </HStack>
-
-                          <VStack spacing={1}>
-                            <Text fontSize="xs" color="gray.500" textAlign="center">
-                              Período: {budget.period === 'monthly' ? 'Mensual' : budget.period === 'weekly' ? 'Semanal' : budget.period === 'biweekly' ? 'Quincenal' : 'Personalizado'}
-                            </Text>
-                            {!isCurrentMonth() && (
-                              <Badge size="sm" colorScheme="blue" variant="outline">
-                                Datos históricos - {getMonthName(selectedMonth, selectedYear)}
-                              </Badge>
-                            )}
-                          </VStack>
-                        </VStack>
-                      </CardBody>
-                    </Card>
-                  );
-                })}
+                {budgetAnalytics.map((budget) => (
+                  <BudgetCard
+                    key={budget.budgetId}
+                    budget={budget}
+                    cardBg={cardBg}
+                    categories={categories}
+                    month={selectedMonth}
+                    year={selectedYear}
+                    isHistorical={!isCurrentMonth()}
+                    historicalLabel={getMonthName(selectedMonth, selectedYear)}
+                    onEdit={handleOpenEdit}
+                    onDelete={deleteBudgetMutation.mutate}
+                  />
+                ))}
               </SimpleGrid>
 
               <Card bg={cardBg}>
@@ -578,5 +498,166 @@ export default function BudgetsPage() {
         </ModalContent>
       </Modal>
     </Box>
+  );
+}
+
+function BudgetCard({ 
+  budget, 
+  cardBg, 
+  categories, 
+  month, 
+  year, 
+  isHistorical, 
+  historicalLabel, 
+  onEdit, 
+  onDelete 
+}: {
+  budget: any;
+  cardBg: string;
+  categories: Category[];
+  month: number;
+  year: number;
+  isHistorical: boolean;
+  historicalLabel: string;
+  onEdit: (budget: any) => void;
+  onDelete: (id: string) => void;
+}) {
+  const { isOpen, onToggle } = useDisclosure();
+
+  const getProgressColor = (status: string) => {
+    switch (status) {
+      case 'over': return 'red';
+      case 'warning': return 'orange';
+      default: return 'green';
+    }
+  };
+
+  const getBudgetStatusBadge = (status: string) => {
+    switch (status) {
+      case 'over': return { text: 'Excedido', color: 'red' };
+      case 'warning': return { text: 'Cerca del límite', color: 'orange' };
+      default: return { text: 'En presupuesto', color: 'green' };
+    }
+  };
+
+  const statusBadge = getBudgetStatusBadge(budget.status);
+
+  const getBudgetPeriodDates = () => {
+    if (budget.period === 'custom') {
+      return { 
+        fromDate: budget.startDate, 
+        toDate: budget.endDate || format(new Date(), 'yyyy-MM-dd') 
+      };
+    }
+    
+    // For monthly, weekly, biweekly in analytics view, we show the whole month
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0);
+    
+    return {
+      fromDate: format(startDate, 'yyyy-MM-dd'),
+      toDate: format(endDate, 'yyyy-MM-dd')
+    };
+  };
+
+  const { fromDate, toDate } = getBudgetPeriodDates();
+
+  return (
+    <Card bg={cardBg}>
+      <CardBody>
+        <VStack spacing={4} align="stretch">
+          <HStack justify="space-between">
+            <HStack spacing={3}>
+              <Text fontSize="2xl">
+                {budget.category.icon || '💰'}
+              </Text>
+              <VStack align="start" spacing={0}>
+                <Text fontWeight="bold">{budget.category.name}</Text>
+                <Badge colorScheme={statusBadge.color} size="sm">
+                  {statusBadge.text}
+                </Badge>
+              </VStack>
+            </HStack>
+            
+            <HStack spacing={2}>
+              <IconButton
+                aria-label="Ver transacciones"
+                icon={isOpen ? <FaChevronUp /> : <FaChevronDown />}
+                size="sm"
+                variant="ghost"
+                onClick={onToggle}
+              />
+              <IconButton
+                aria-label="Editar presupuesto"
+                icon={<FaEdit />}
+                size="sm"
+                variant="ghost"
+                onClick={() => onEdit(budget)}
+              />
+              <IconButton
+                aria-label="Eliminar presupuesto"
+                icon={<FaTrash />}
+                size="sm"
+                variant="ghost"
+                colorScheme="red"
+                onClick={() => onDelete(budget.budgetId)}
+              />
+            </HStack>
+          </HStack>
+
+          <Progress 
+            value={Math.min(budget.percentage, 100)} 
+            colorScheme={getProgressColor(budget.status)}
+            size="lg"
+            borderRadius="md"
+          />
+
+          <HStack justify="space-between" fontSize="sm">
+            <Text color="gray.600">
+              ${budget.spentAmount.toLocaleString()} gastado
+            </Text>
+            <Text fontWeight="medium">
+              ${budget.budgetAmount.toLocaleString()} asignado
+            </Text>
+          </HStack>
+
+          <HStack justify="space-between" fontSize="xs" color="gray.500">
+            <Text>{budget.percentage.toFixed(1)}% utilizado</Text>
+            {budget.isOverBudget ? (
+              <Text color="red.500">
+                Excedido por ${Math.abs(budget.remaining).toLocaleString()}
+              </Text>
+            ) : (
+              <Text color="green.500">
+                Disponible: ${budget.remaining.toLocaleString()}
+              </Text>
+            )}
+          </HStack>
+
+          <VStack spacing={1}>
+            <Text fontSize="xs" color="gray.500" textAlign="center">
+              Período: {budget.period === 'monthly' ? 'Mensual' : budget.period === 'weekly' ? 'Semanal' : budget.period === 'biweekly' ? 'Quincenal' : 'Personalizado'}
+            </Text>
+            {isHistorical && (
+              <Badge size="sm" colorScheme="blue" variant="outline">
+                Datos históricos - {historicalLabel}
+              </Badge>
+            )}
+          </VStack>
+
+          <Collapse in={isOpen} animateOpacity>
+            <Box mt={4} pt={4} borderTopWidth="1px">
+              <Text fontSize="sm" fontWeight="bold" mb={2}>Transacciones</Text>
+              <BudgetTransactionList
+                categoryId={budget.categoryId}
+                fromDate={fromDate}
+                toDate={toDate}
+                categories={categories}
+              />
+            </Box>
+          </Collapse>
+        </VStack>
+      </CardBody>
+    </Card>
   );
 }
