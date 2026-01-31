@@ -22,11 +22,11 @@ import { HamburgerIcon, CloseIcon, BellIcon, ChevronDownIcon } from '@chakra-ui/
 import { useLocation } from 'wouter';
 import { useAuth } from '@/hooks/use-auth';
 import { useQuery } from '@tanstack/react-query';
-import { 
-  FaHome, 
-  FaExchangeAlt, 
-  FaRobot, 
-  FaUser, 
+import {
+  FaHome,
+  FaExchangeAlt,
+  FaRobot,
+  FaUser,
   FaSignOutAlt,
   FaTags,
   FaChartPie,
@@ -34,7 +34,8 @@ import {
   FaFile,
   FaUsers,
   FaWizardsOfTheCoast,
-  FaCog
+  FaCog,
+  FaPlug
 } from 'react-icons/fa';
 
 const MainLinks = [
@@ -49,6 +50,7 @@ const ConfigLinks = [
   { name: 'Reglas', href: '/rules', icon: FaRuler },
   { name: 'Archivos', href: '/files', icon: FaFile },
   { name: 'Equipo', href: '/team', icon: FaUsers },
+  { name: 'Conectar Claude', href: '/mcp-setup', icon: FaPlug },
 ];
 
 const NavLink = ({ children, href, icon: Icon, ...rest }: any) => {

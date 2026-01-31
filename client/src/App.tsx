@@ -22,6 +22,7 @@ import NotificationsPage from "@/pages/notifications-page";
 import TeamPage from "@/pages/team-page";
 import ProfilePage from "@/pages/profile-page";
 import AgentePage from "@/pages/agente-page";
+import McpSetupPage from "@/pages/mcp-setup-page";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -43,6 +44,7 @@ function Router() {
       <ProtectedRoute path="/team" component={TeamPage} />
       <ProtectedRoute path="/profile" component={ProfilePage} />
       <ProtectedRoute path="/agente" component={AgentePage} />
+      <ProtectedRoute path="/mcp-setup" component={McpSetupPage} />
       <Route component={NotFound} />
     </Switch>
   );

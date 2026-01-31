@@ -229,6 +229,41 @@ All schemas are defined in `shared/schema.ts` using Drizzle ORM with Zod validat
 - Form components with comprehensive Zod validation
 - Data visualization with Recharts integration
 
+## MCP Server (Model Context Protocol)
+
+El proyecto incluye un servidor MCP que permite a agentes externos (como Claude Code) gestionar las finanzas usando las mismas herramientas del agente interno.
+
+**Ubicación:** `mcp/`
+
+**Herramientas disponibles:**
+- `obtener_transacciones` - Listar transacciones con filtros
+- `crear_transacciones` - Crear transacciones
+- `actualizar_transaccion` - Modificar transacciones
+- `eliminar_transaccion` - Eliminar transacciones (soft delete)
+- `obtener_categorias` - Listar categorías
+- `gestionar_categoria` - Crear/editar categorías
+- `obtener_reglas` - Listar reglas de categorización
+- `gestionar_regla` - Crear/editar reglas
+- `obtener_presupuestos` - Listar presupuestos con gastos
+- `gestionar_presupuesto` - Crear/editar presupuestos
+- `obtener_contexto` - Info del usuario, equipo y bancos
+
+**Configuración:**
+```bash
+# Variables requeridas
+export DATABASE_URL="postgresql://..."
+export MCP_USER_EMAIL="usuario@ejemplo.com"
+
+# Instalar dependencias
+cd mcp && npm install
+
+# Probar con inspector
+npm run inspect
+```
+
+**Uso con Claude Code:**
+El archivo `.mcp.json` está configurado. Solo exporta las variables y ejecuta `/mcp` para verificar.
+
 ## Development Notes
 
 - Database URL must be set in environment variables

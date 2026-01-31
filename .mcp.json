@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "finanzas-familiares": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["tsx", "mcp/src/index.ts"],
+      "env": {
+        "DATABASE_URL": "${DATABASE_URL}",
+        "MCP_USER_EMAIL": "${MCP_USER_EMAIL}"
+      }
+    }
+  }
+}
