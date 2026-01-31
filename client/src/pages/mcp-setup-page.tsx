@@ -28,14 +28,18 @@ import {
   Card,
   CardHeader,
   CardBody,
-  OrderedList,
-  ListItem,
   UnorderedList,
+  ListItem,
   useClipboard,
   Button,
   Tooltip,
+  Tabs,
+  TabList,
+  TabPanels,
+  Tab,
+  TabPanel,
 } from '@chakra-ui/react';
-import { FaRobot, FaCopy, FaCheck, FaTerminal, FaPlug, FaKey, FaTools } from 'react-icons/fa';
+import { FaRobot, FaCopy, FaCheck, FaTerminal, FaPlug, FaKey, FaTools, FaCloud, FaLaptop } from 'react-icons/fa';
 import Navigation from '@/components/navigation';
 import { useAuth } from '@/hooks/use-auth';
 
@@ -78,27 +82,24 @@ export default function McpSetupPage() {
   const cardBg = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.700');
 
-  const mcpConfig = `{
+  // Get the current app URL for remote connection
+  const appUrl = typeof window !== 'undefined' ? window.location.origin : 'https://tu-app.railway.app';
+
+  const remoteConfig = `{
   "mcpServers": {
     "finanzas-familiares": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["tsx", "mcp/src/index.ts"],
-      "env": {
-        "DATABASE_URL": "TU_URL_DE_BASE_DE_DATOS",
-        "MCP_USER_EMAIL": "${user?.email || 'tu-email@ejemplo.com'}"
+      "type": "http",
+      "url": "${appUrl}/api/mcp",
+      "headers": {
+        "Authorization": "Bearer ${user?.email || 'tu-email@ejemplo.com'}"
       }
     }
   }
 }`;
 
-  const envVarsExample = `export DATABASE_URL="postgresql://usuario:password@host:puerto/basedatos"
-export MCP_USER_EMAIL="${user?.email || 'tu-email@ejemplo.com'}"`;
-
-  const claudeAddCommand = `claude mcp add --transport stdio finanzas-familiares \\
-  --env DATABASE_URL="$DATABASE_URL" \\
-  --env MCP_USER_EMAIL="$MCP_USER_EMAIL" \\
-  -- npx tsx mcp/src/index.ts`;
+  const claudeAddRemoteCommand = `claude mcp add --transport http finanzas-familiares \\
+  --header "Authorization: Bearer ${user?.email || 'tu-email@ejemplo.com'}" \\
+  ${appUrl}/api/mcp`;
 
   return (
     <Box minH="100vh" bg={useColorModeValue('gray.50', 'gray.900')}>
@@ -129,12 +130,25 @@ export MCP_USER_EMAIL="${user?.email || 'tu-email@ejemplo.com'}"`;
             </Box>
           </Alert>
 
+          {/* Quick Setup - Remote (Recommended) */}
+          <Alert status="success" borderRadius="md">
+            <AlertIcon as={FaCloud} />
+            <Box flex="1">
+              <AlertTitle>Conexión Remota (Recomendado)</AlertTitle>
+              <AlertDescription>
+                No necesitas clonar código ni instalar dependencias. Solo configura Claude Code
+                para conectarse directamente a esta aplicación.
+              </AlertDescription>
+            </Box>
+            <Badge colorScheme="green" fontSize="sm">Sin código local</Badge>
+          </Alert>
+
           {/* Prerequisites */}
           <Card bg={cardBg} borderColor={borderColor} borderWidth={1}>
             <CardHeader>
               <HStack>
                 <Icon as={FaKey} color="orange.500" />
-                <Heading size="md">Requisitos Previos</Heading>
+                <Heading size="md">Requisitos</Heading>
               </HStack>
             </CardHeader>
             <CardBody>
@@ -147,47 +161,44 @@ export MCP_USER_EMAIL="${user?.email || 'tu-email@ejemplo.com'}"`;
                   </Text>
                 </ListItem>
                 <ListItem>
-                  <Text><strong>Cuenta activa</strong> en Finanzas Familiares (ya la tienes)</Text>
-                </ListItem>
-                <ListItem>
-                  <Text><strong>Acceso a la URL de base de datos</strong> del proyecto</Text>
+                  <Text><strong>Cuenta activa</strong> en Finanzas Familiares</Text>
                   <Text fontSize="sm" color="gray.500">
-                    Solicítala al administrador del equipo si no la tienes
+                    Tu email: <Code>{user?.email || 'No disponible'}</Code>
                   </Text>
                 </ListItem>
               </UnorderedList>
             </CardBody>
           </Card>
 
-          {/* Step by Step */}
+          {/* Step by Step - Remote Setup */}
           <Card bg={cardBg} borderColor={borderColor} borderWidth={1}>
             <CardHeader>
               <HStack>
                 <Icon as={FaTerminal} color="green.500" />
-                <Heading size="md">Guía Paso a Paso</Heading>
+                <Heading size="md">Configuración Rápida (2 pasos)</Heading>
               </HStack>
             </CardHeader>
             <CardBody>
-              <Accordion allowMultiple defaultIndex={[0]}>
+              <Accordion allowMultiple defaultIndex={[0, 1]}>
                 {/* Step 1 */}
                 <AccordionItem border="none">
                   <AccordionButton py={4}>
                     <HStack flex="1">
                       <Badge colorScheme="blue" fontSize="md" px={2}>1</Badge>
-                      <Text fontWeight="bold">Configurar Variables de Entorno</Text>
+                      <Text fontWeight="bold">Agregar el servidor MCP a Claude Code</Text>
                     </HStack>
                     <AccordionIcon />
                   </AccordionButton>
                   <AccordionPanel pb={4}>
                     <Text mb={4}>
-                      Exporta las variables de entorno necesarias en tu terminal:
+                      Ejecuta este comando en tu terminal:
                     </Text>
-                    <CodeBlock copyText={envVarsExample}>{envVarsExample}</CodeBlock>
-                    <Alert status="warning" mt={4} size="sm">
+                    <CodeBlock copyText={claudeAddRemoteCommand}>{claudeAddRemoteCommand}</CodeBlock>
+                    <Alert status="info" mt={4} size="sm">
                       <AlertIcon />
                       <Text fontSize="sm">
-                        <strong>Tu email:</strong> {user?.email || 'No disponible'} —
-                        Usa este email para conectarte con tu cuenta
+                        Este comando configura Claude Code para conectarse a esta aplicación
+                        usando tu email como autenticación.
                       </Text>
                     </Alert>
                   </AccordionPanel>
@@ -198,109 +209,48 @@ export MCP_USER_EMAIL="${user?.email || 'tu-email@ejemplo.com'}"`;
                   <AccordionButton py={4}>
                     <HStack flex="1">
                       <Badge colorScheme="blue" fontSize="md" px={2}>2</Badge>
-                      <Text fontWeight="bold">Clonar el Repositorio (si no lo tienes)</Text>
+                      <Text fontWeight="bold">Verificar la conexión</Text>
                     </HStack>
                     <AccordionIcon />
                   </AccordionButton>
                   <AccordionPanel pb={4}>
                     <Text mb={4}>
-                      Clona el repositorio del proyecto y navega a la carpeta:
+                      Abre Claude Code y verifica que el MCP esté conectado:
                     </Text>
-                    <CodeBlock>{`git clone <URL_DEL_REPOSITORIO>
-cd finanzas-familiares`}</CodeBlock>
-                    <Text mt={4} fontSize="sm" color="gray.500">
-                      Si ya tienes el proyecto, solo asegúrate de estar en la carpeta raíz.
-                    </Text>
-                  </AccordionPanel>
-                </AccordionItem>
-
-                {/* Step 3 */}
-                <AccordionItem border="none">
-                  <AccordionButton py={4}>
-                    <HStack flex="1">
-                      <Badge colorScheme="blue" fontSize="md" px={2}>3</Badge>
-                      <Text fontWeight="bold">Instalar Dependencias del MCP</Text>
-                    </HStack>
-                    <AccordionIcon />
-                  </AccordionButton>
-                  <AccordionPanel pb={4}>
-                    <Text mb={4}>
-                      Instala las dependencias del servidor MCP:
-                    </Text>
-                    <CodeBlock>{`cd mcp
-npm install
-cd ..`}</CodeBlock>
-                  </AccordionPanel>
-                </AccordionItem>
-
-                {/* Step 4 - Option A */}
-                <AccordionItem border="none">
-                  <AccordionButton py={4}>
-                    <HStack flex="1">
-                      <Badge colorScheme="green" fontSize="md" px={2}>4A</Badge>
-                      <Text fontWeight="bold">Opción A: Usar archivo .mcp.json (Recomendado)</Text>
-                    </HStack>
-                    <AccordionIcon />
-                  </AccordionButton>
-                  <AccordionPanel pb={4}>
-                    <Text mb={4}>
-                      El proyecto ya incluye un archivo <Code>.mcp.json</Code> configurado.
-                      Solo necesitas tener las variables de entorno exportadas y abrir Claude Code:
-                    </Text>
-                    <CodeBlock>{`# Con las variables exportadas, abre Claude Code
-claude
-
-# Verifica que el MCP esté conectado
+                    <CodeBlock>{`claude
 /mcp`}</CodeBlock>
-                    <Text mt={4} fontSize="sm" color="gray.500">
-                      Claude Code detectará automáticamente el archivo .mcp.json y conectará el servidor.
-                    </Text>
-                  </AccordionPanel>
-                </AccordionItem>
-
-                {/* Step 4 - Option B */}
-                <AccordionItem border="none">
-                  <AccordionButton py={4}>
-                    <HStack flex="1">
-                      <Badge colorScheme="purple" fontSize="md" px={2}>4B</Badge>
-                      <Text fontWeight="bold">Opción B: Agregar MCP Manualmente</Text>
-                    </HStack>
-                    <AccordionIcon />
-                  </AccordionButton>
-                  <AccordionPanel pb={4}>
-                    <Text mb={4}>
-                      Si prefieres agregar el MCP manualmente (útil para configuración global):
-                    </Text>
-                    <CodeBlock copyText={claudeAddCommand}>{claudeAddCommand}</CodeBlock>
-                  </AccordionPanel>
-                </AccordionItem>
-
-                {/* Step 5 */}
-                <AccordionItem border="none">
-                  <AccordionButton py={4}>
-                    <HStack flex="1">
-                      <Badge colorScheme="blue" fontSize="md" px={2}>5</Badge>
-                      <Text fontWeight="bold">Verificar Conexión</Text>
-                    </HStack>
-                    <AccordionIcon />
-                  </AccordionButton>
-                  <AccordionPanel pb={4}>
-                    <Text mb={4}>
-                      Dentro de Claude Code, verifica que el MCP esté conectado:
-                    </Text>
-                    <CodeBlock>{`/mcp`}</CodeBlock>
                     <Text mt={4}>
                       Deberías ver <Code>finanzas-familiares</Code> en la lista de servidores conectados.
                     </Text>
                     <Alert status="success" mt={4}>
                       <AlertIcon />
                       <Text>
-                        ¡Listo! Ahora puedes pedirle a Claude que gestione tus finanzas.
+                        ¡Listo! Ya puedes pedirle a Claude que gestione tus finanzas.
                       </Text>
                     </Alert>
                   </AccordionPanel>
                 </AccordionItem>
               </Accordion>
+            </CardBody>
+          </Card>
+
+          {/* Alternative: Manual JSON Config */}
+          <Card bg={cardBg} borderColor={borderColor} borderWidth={1}>
+            <CardHeader>
+              <HStack>
+                <Icon as={FaPlug} color="purple.500" />
+                <Heading size="md">Alternativa: Configuración Manual</Heading>
+              </HStack>
+            </CardHeader>
+            <CardBody>
+              <Text mb={4}>
+                Si prefieres, puedes crear un archivo <Code>.mcp.json</Code> en cualquier carpeta
+                donde uses Claude Code:
+              </Text>
+              <CodeBlock copyText={remoteConfig}>{remoteConfig}</CodeBlock>
+              <Text mt={4} fontSize="sm" color="gray.500">
+                Claude Code detectará automáticamente este archivo y conectará el servidor.
+              </Text>
             </CardBody>
           </Card>
 
@@ -376,10 +326,7 @@ claude
           {/* Example Usage */}
           <Card bg={cardBg} borderColor={borderColor} borderWidth={1}>
             <CardHeader>
-              <HStack>
-                <Icon as={FaPlug} color="purple.500" />
-                <Heading size="md">Ejemplos de Uso</Heading>
-              </HStack>
+              <Heading size="md">Ejemplos de Uso</Heading>
             </CardHeader>
             <CardBody>
               <VStack align="stretch" spacing={4}>
@@ -426,43 +373,70 @@ que contengan 'Uber' se categoricen como Transporte"`}</CodeBlock>
                   </AccordionButton>
                   <AccordionPanel>
                     <UnorderedList>
-                      <ListItem>Verifica que las variables de entorno estén exportadas</ListItem>
                       <ListItem>Reinicia Claude Code completamente</ListItem>
-                      <ListItem>Asegúrate de estar en la carpeta raíz del proyecto</ListItem>
+                      <ListItem>Verifica que el comando se ejecutó sin errores</ListItem>
+                      <ListItem>Prueba ejecutar <Code>claude mcp list</Code> para ver servidores configurados</ListItem>
                     </UnorderedList>
                   </AccordionPanel>
                 </AccordionItem>
                 <AccordionItem>
                   <AccordionButton>
                     <Text flex="1" textAlign="left" fontWeight="medium">
-                      Error de conexión a base de datos
+                      Error de autenticación (401)
                     </Text>
                     <AccordionIcon />
                   </AccordionButton>
                   <AccordionPanel>
                     <UnorderedList>
-                      <ListItem>Verifica que DATABASE_URL sea correcta</ListItem>
-                      <ListItem>Asegúrate de que la base de datos esté accesible</ListItem>
-                      <ListItem>Revisa que no haya restricciones de IP</ListItem>
-                    </UnorderedList>
-                  </AccordionPanel>
-                </AccordionItem>
-                <AccordionItem>
-                  <AccordionButton>
-                    <Text flex="1" textAlign="left" fontWeight="medium">
-                      Usuario no encontrado
-                    </Text>
-                    <AccordionIcon />
-                  </AccordionButton>
-                  <AccordionPanel>
-                    <UnorderedList>
-                      <ListItem>Verifica que MCP_USER_EMAIL coincida con tu email registrado</ListItem>
+                      <ListItem>Verifica que el email en el header sea exactamente: <Code>{user?.email}</Code></ListItem>
                       <ListItem>El email es sensible a mayúsculas/minúsculas</ListItem>
-                      <ListItem>Tu email actual: <Code>{user?.email}</Code></ListItem>
+                      <ListItem>Asegúrate de que tu cuenta esté activa</ListItem>
+                    </UnorderedList>
+                  </AccordionPanel>
+                </AccordionItem>
+                <AccordionItem>
+                  <AccordionButton>
+                    <Text flex="1" textAlign="left" fontWeight="medium">
+                      Error de conexión
+                    </Text>
+                    <AccordionIcon />
+                  </AccordionButton>
+                  <AccordionPanel>
+                    <UnorderedList>
+                      <ListItem>Verifica que la URL de la aplicación sea correcta</ListItem>
+                      <ListItem>URL actual: <Code>{appUrl}</Code></ListItem>
+                      <ListItem>Asegúrate de tener conexión a internet</ListItem>
                     </UnorderedList>
                   </AccordionPanel>
                 </AccordionItem>
               </Accordion>
+            </CardBody>
+          </Card>
+
+          {/* API Endpoint Info */}
+          <Card bg={cardBg} borderColor={borderColor} borderWidth={1}>
+            <CardHeader>
+              <Heading size="md">Información Técnica</Heading>
+            </CardHeader>
+            <CardBody>
+              <VStack align="stretch" spacing={2}>
+                <HStack>
+                  <Text fontWeight="bold" minW="120px">Endpoint:</Text>
+                  <Code>{appUrl}/api/mcp</Code>
+                </HStack>
+                <HStack>
+                  <Text fontWeight="bold" minW="120px">Protocolo:</Text>
+                  <Code>JSON-RPC 2.0</Code>
+                </HStack>
+                <HStack>
+                  <Text fontWeight="bold" minW="120px">Autenticación:</Text>
+                  <Code>Bearer {user?.email || '<tu-email>'}</Code>
+                </HStack>
+                <HStack>
+                  <Text fontWeight="bold" minW="120px">Tu email:</Text>
+                  <Code>{user?.email || 'No disponible'}</Code>
+                </HStack>
+              </VStack>
             </CardBody>
           </Card>
         </VStack>

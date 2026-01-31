@@ -12,6 +12,7 @@ import { createReadStream } from "fs";
 import csvParser from "csv-parser";
 import * as XLSX from "xlsx";
 import { getLocalDateYMD, parseYmdToLocalDate } from "./utils/date";
+import { mcpTools, executeTool } from "./mcp-server";
 
 export function registerRoutes(app: Express): Server {
   // Check database connection on startup
@@ -26,6 +27,124 @@ export function registerRoutes(app: Express): Server {
 
   // sets up /api/register, /api/login, /api/logout, /api/user
   setupAuth(app);
+
+  // ============== MCP (Model Context Protocol) Endpoints ==============
+  // These endpoints allow Claude Code to connect remotely without local code
+
+  // MCP Server Info - returns server capabilities
+  app.get("/api/mcp", (req, res) => {
+    res.json({
+      jsonrpc: "2.0",
+      result: {
+        protocolVersion: "2024-11-05",
+        serverInfo: {
+          name: "finanzas-familiares",
+          version: "1.0.0",
+        },
+        capabilities: {
+          tools: {},
+        },
+      },
+    });
+  });
+
+  // MCP JSON-RPC endpoint - handles all MCP protocol messages
+  app.post("/api/mcp", async (req, res) => {
+    // MCP can use either session auth or Bearer token (email)
+    let user = req.user;
+
+    // Check for Bearer token authentication (for Claude Code remote connection)
+    const authHeader = req.headers.authorization;
+    if (!user && authHeader?.startsWith("Bearer ")) {
+      const email = authHeader.slice(7).trim();
+      if (email) {
+        const foundUser = await storage.getUserByEmail(email);
+        if (foundUser) {
+          user = foundUser;
+        }
+      }
+    }
+
+    if (!user) {
+      return res.status(401).json({
+        jsonrpc: "2.0",
+        error: { code: -32000, message: "Unauthorized. Use Bearer token with your email or login first." },
+        id: req.body?.id || null,
+      });
+    }
+
+    const { jsonrpc, method, params, id } = req.body;
+
+    if (jsonrpc !== "2.0") {
+      return res.status(400).json({
+        jsonrpc: "2.0",
+        error: { code: -32600, message: "Invalid JSON-RPC version" },
+        id,
+      });
+    }
+
+    try {
+      switch (method) {
+        case "initialize":
+          return res.json({
+            jsonrpc: "2.0",
+            result: {
+              protocolVersion: "2024-11-05",
+              serverInfo: { name: "finanzas-familiares", version: "1.0.0" },
+              capabilities: { tools: {} },
+            },
+            id,
+          });
+
+        case "tools/list":
+          return res.json({
+            jsonrpc: "2.0",
+            result: { tools: mcpTools },
+            id,
+          });
+
+        case "tools/call":
+          const { name, arguments: args } = params || {};
+          if (!name) {
+            return res.status(400).json({
+              jsonrpc: "2.0",
+              error: { code: -32602, message: "Tool name required" },
+              id,
+            });
+          }
+
+          const result = await executeTool(name, args || {}, user);
+          return res.json({
+            jsonrpc: "2.0",
+            result,
+            id,
+          });
+
+        case "notifications/initialized":
+        case "ping":
+          return res.json({ jsonrpc: "2.0", result: {}, id });
+
+        default:
+          return res.status(400).json({
+            jsonrpc: "2.0",
+            error: { code: -32601, message: `Method not found: ${method}` },
+            id,
+          });
+      }
+    } catch (error) {
+      console.error("MCP error:", error);
+      return res.status(500).json({
+        jsonrpc: "2.0",
+        error: { code: -32000, message: `Internal error: ${error}` },
+        id,
+      });
+    }
+  });
+
+  // MCP Tools list (convenience endpoint)
+  app.get("/api/mcp/tools", (req, res) => {
+    res.json({ tools: mcpTools });
+  });
 
   // Get team information and members for current user
   app.get("/api/team", async (req, res) => {
