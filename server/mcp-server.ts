@@ -170,6 +170,46 @@ export const mcpTools = [
     description: 'Obtiene información del contexto actual: usuario, equipo y bancos disponibles',
     inputSchema: { type: 'object', properties: {} },
   },
+  {
+    name: 'obtener_bancos',
+    description: 'Obtiene la lista de bancos configurados para el usuario',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'agregar_banco',
+    description: 'Agrega un nuevo banco a la lista de bancos del usuario',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        nombre: { type: 'string', description: 'Nombre del banco a agregar' },
+      },
+      required: ['nombre'],
+    },
+  },
+  {
+    name: 'renombrar_banco',
+    description: 'Renombra un banco existente. Actualiza automáticamente todas las transacciones que usen ese banco',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        nombreActual: { type: 'string', description: 'Nombre actual del banco' },
+        nombreNuevo: { type: 'string', description: 'Nuevo nombre para el banco' },
+      },
+      required: ['nombreActual', 'nombreNuevo'],
+    },
+  },
+  {
+    name: 'eliminar_banco',
+    description: 'Elimina un banco y reemplaza todas sus transacciones con otro banco. Requiere especificar el banco de reemplazo',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        nombre: { type: 'string', description: 'Nombre del banco a eliminar' },
+        reemplazo: { type: 'string', description: 'Nombre del banco que reemplazará al eliminado en las transacciones' },
+      },
+      required: ['nombre', 'reemplazo'],
+    },
+  },
 ];
 
 // Tool execution handlers
@@ -204,6 +244,14 @@ export async function executeTool(
         return await manageBudget(ctx, args);
       case 'obtener_contexto':
         return await getContext(ctx);
+      case 'obtener_bancos':
+        return await getBanks(ctx, user);
+      case 'agregar_banco':
+        return await addBank(ctx, args, user);
+      case 'renombrar_banco':
+        return await renameBank(ctx, args, user);
+      case 'eliminar_banco':
+        return await deleteBank(ctx, args, user);
       default:
         return {
           content: [{ type: 'text', text: `Herramienta desconocida: ${toolName}` }],
@@ -560,6 +608,151 @@ async function getContext(ctx: UserContext): Promise<McpToolResult> {
         fechaActual: now.toISOString().split('T')[0],
         horaActual: now.toLocaleTimeString('es-ES', { timeZone: 'America/Mexico_City' }),
       }, null, 2),
+    }],
+  };
+}
+
+// Bank management tools
+async function getBanks(ctx: UserContext, user: User): Promise<McpToolResult> {
+  const prefs = (user as any).preferences || {};
+  const banks: string[] = Array.isArray(prefs.banks) ? prefs.banks : ['Banregio', 'BBVA'];
+
+  return {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        total: banks.length,
+        bancos: banks,
+        nota: banks.length === 0 ? 'No hay bancos configurados. Se usarán los valores por defecto.' : null,
+      }, null, 2),
+    }],
+  };
+}
+
+async function addBank(ctx: UserContext, args: any, user: User): Promise<McpToolResult> {
+  const { nombre } = args;
+
+  if (!nombre || typeof nombre !== 'string' || !nombre.trim()) {
+    return {
+      content: [{ type: 'text', text: 'El nombre del banco es requerido' }],
+      isError: true,
+    };
+  }
+
+  const existingBanks = Array.isArray((user as any).preferences?.banks)
+    ? [...(user as any).preferences.banks]
+    : [];
+
+  if (existingBanks.includes(nombre.trim())) {
+    return {
+      content: [{ type: 'text', text: `El banco "${nombre}" ya existe en tu lista` }],
+      isError: true,
+    };
+  }
+
+  existingBanks.push(nombre.trim());
+
+  const updated = await storage.updateUser(user.id, {
+    preferences: { ...(user as any).preferences, banks: existingBanks },
+  } as any);
+
+  if (!updated) {
+    return {
+      content: [{ type: 'text', text: 'Error al agregar el banco' }],
+      isError: true,
+    };
+  }
+
+  return {
+    content: [{
+      type: 'text',
+      text: `Banco "${nombre.trim()}" agregado exitosamente. Bancos actuales: ${existingBanks.join(', ')}`,
+    }],
+  };
+}
+
+async function renameBank(ctx: UserContext, args: any, user: User): Promise<McpToolResult> {
+  const { nombreActual, nombreNuevo } = args;
+
+  if (!nombreActual || !nombreNuevo) {
+    return {
+      content: [{ type: 'text', text: 'Se requiere el nombre actual y el nuevo nombre del banco' }],
+      isError: true,
+    };
+  }
+
+  const existingBanks = Array.isArray((user as any).preferences?.banks)
+    ? [...(user as any).preferences.banks]
+    : [];
+
+  if (!existingBanks.includes(nombreActual)) {
+    return {
+      content: [{ type: 'text', text: `El banco "${nombreActual}" no existe en tu lista. Bancos disponibles: ${existingBanks.join(', ')}` }],
+      isError: true,
+    };
+  }
+
+  if (existingBanks.includes(nombreNuevo.trim()) && nombreActual !== nombreNuevo.trim()) {
+    return {
+      content: [{ type: 'text', text: `Ya existe un banco con el nombre "${nombreNuevo}"` }],
+      isError: true,
+    };
+  }
+
+  // Use storage method to rename bank and update all transactions
+  const result = await storage.renameBank(ctx.teamId, ctx.userId, nombreActual, nombreNuevo.trim());
+
+  return {
+    content: [{
+      type: 'text',
+      text: `Banco renombrado de "${nombreActual}" a "${nombreNuevo.trim()}". ` +
+        `Se actualizaron ${result.updatedTransactions} transacciones y ${result.updatedUsers} usuarios.`,
+    }],
+  };
+}
+
+async function deleteBank(ctx: UserContext, args: any, user: User): Promise<McpToolResult> {
+  const { nombre, reemplazo } = args;
+
+  if (!nombre || !reemplazo) {
+    return {
+      content: [{ type: 'text', text: 'Se requiere el nombre del banco a eliminar y el banco de reemplazo' }],
+      isError: true,
+    };
+  }
+
+  const existingBanks = Array.isArray((user as any).preferences?.banks)
+    ? [...(user as any).preferences.banks]
+    : [];
+
+  if (!existingBanks.includes(nombre)) {
+    return {
+      content: [{ type: 'text', text: `El banco "${nombre}" no existe en tu lista. Bancos disponibles: ${existingBanks.join(', ')}` }],
+      isError: true,
+    };
+  }
+
+  if (nombre === reemplazo.trim()) {
+    return {
+      content: [{ type: 'text', text: 'El banco de reemplazo debe ser diferente al banco a eliminar' }],
+      isError: true,
+    };
+  }
+
+  // Use storage method to replace bank in all transactions
+  const result = await storage.replaceBank(ctx.teamId, ctx.userId, nombre, reemplazo.trim());
+
+  // Get updated banks list
+  const updatedUser = await storage.getUser(user.id);
+  const newBanks = Array.isArray((updatedUser as any)?.preferences?.banks)
+    ? (updatedUser as any).preferences.banks
+    : [];
+
+  return {
+    content: [{
+      type: 'text',
+      text: `Banco "${nombre}" eliminado. ${result.updatedTransactions} transacciones fueron actualizadas al banco "${reemplazo.trim()}". ` +
+        `Bancos actuales: ${newBanks.join(', ')}`,
     }],
   };
 }

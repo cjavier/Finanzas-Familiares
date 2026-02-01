@@ -318,6 +318,22 @@ export default function McpSetupPage() {
                     <Td><Code>obtener_contexto</Code></Td>
                     <Td>Ver información del usuario, equipo y bancos</Td>
                   </Tr>
+                  <Tr>
+                    <Td><Code>obtener_bancos</Code></Td>
+                    <Td>Ver lista de bancos configurados</Td>
+                  </Tr>
+                  <Tr>
+                    <Td><Code>agregar_banco</Code></Td>
+                    <Td>Agregar un nuevo banco a la lista</Td>
+                  </Tr>
+                  <Tr>
+                    <Td><Code>renombrar_banco</Code></Td>
+                    <Td>Renombrar un banco (actualiza transacciones)</Td>
+                  </Tr>
+                  <Tr>
+                    <Td><Code>eliminar_banco</Code></Td>
+                    <Td>Eliminar un banco (requiere reemplazo)</Td>
+                  </Tr>
                 </Tbody>
               </Table>
             </CardBody>
@@ -352,6 +368,13 @@ que contengan 'Uber' se categoricen como Transporte"`}</CodeBlock>
                 <Box>
                   <Text fontWeight="bold" mb={2}>Ver estado de presupuestos:</Text>
                   <CodeBlock>{`"¿Cómo voy con mis presupuestos?"`}</CodeBlock>
+                </Box>
+                <Divider />
+                <Box>
+                  <Text fontWeight="bold" mb={2}>Gestionar bancos:</Text>
+                  <CodeBlock>{`"Agrega el banco Santander a mi lista"
+"Renombra BBVA a BBVA México"
+"¿Qué bancos tengo configurados?"`}</CodeBlock>
                 </Box>
               </VStack>
             </CardBody>
